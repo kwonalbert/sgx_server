@@ -21,7 +21,7 @@ type SessionManager struct {
 	ias         *IAS
 }
 
-func NewSessionManager(release bool, iasKey, iasPub string, mrenclaves [][32]byte, spid []byte, longTermKey *ecdsa.PrivateKey) *SessionManager {
+func NewSessionManager(release bool, subscription string, mrenclaves [][32]byte, spid []byte, longTermKey *ecdsa.PrivateKey) *SessionManager {
 	sessions := make(map[uint64]*Session)
 	sessions[0] = nil
 
@@ -32,7 +32,7 @@ func NewSessionManager(release bool, iasKey, iasPub string, mrenclaves [][32]byt
 		mrenclaves:  mrenclaves,
 		spid:        spid,
 		longTermKey: longTermKey,
-		ias:         NewIAS(release, iasKey, iasPub),
+		ias:         NewIAS(release, subscription),
 	}
 	return as
 }

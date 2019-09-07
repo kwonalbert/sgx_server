@@ -20,8 +20,7 @@ var (
 	spid    = flag.String("spid", "spid", "File containing the SPID")
 	mr      = flag.String("mr", "mrenclaves", "Directory containing all valid MRs")
 	ltKey   = flag.String("ltKey", "server_private.pem", "PEM encoded long private key of the server")
-	iasKey  = flag.String("iasKey", "ias_private.pem", "PEM encoded TLS private key for establishing connection with IAS")
-	iasPub  = flag.String("iasPub", "ias_public.pem", "PEM encoded TLS public key for establishing connection with IAS")
+	sub     = flag.String("sub", "subscription", "Subscription key for IAS")
 	tlsKey  = flag.String("tlsKey", "tls_private.pem", "PEM encoded TLS private key of the server")
 	tlsPub  = flag.String("tlsPub", "tls_public.pem", "PEM encoded TLS public key of the server")
 )
@@ -56,9 +55,10 @@ func main() {
 	}
 
 	mrenclaves := sgx_server.ReadMREnclaves(*mr)
+	subscription := sgx_server.ReadSubscription(*sub)
 	srv := grpc.NewServer(grpc.Creds(creds))
 
-	sm := sgx_server.NewSessionManager(*release, *iasKey, *iasPub, mrenclaves, sgx_server.ReadSPID(*spid), ltPriv)
+	sm := sgx_server.NewSessionManager(*release, subscription, mrenclaves, sgx_server.ReadSPID(*spid), ltPriv)
 
 	lis, err := net.Listen("tcp", ":"+*port)
 	if err != nil {

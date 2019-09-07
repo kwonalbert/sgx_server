@@ -48,3 +48,11 @@ func ReadSPID(fn string) []byte {
 
 	return spid
 }
+
+func ReadSubscription(fn string) string {
+	sb, err := ioutil.ReadFile(fn)
+	if err != nil {
+		log.Fatal("Could not read the subscription key.")
+	}
+	return string(sb)
+}
