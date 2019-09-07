@@ -1,2 +1,2 @@
-# sgx_go_server
+# sgx_server
 Server side operations for SGX remote attestation written in Go.
