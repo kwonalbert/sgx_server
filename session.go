@@ -166,13 +166,18 @@ func (sn *Session) CreateMsg2() (*Msg2, error) {
 		return nil, err
 	}
 
+	// sometimes r and s are less than 32 bytes, but we need it to be exact
+	var r32, s32 [32]byte
 	rb, sb := r.Bytes(), s.Bytes()
 	// convert to little endian
 	reverse(rb)
 	reverse(sb)
+	copy(r32[32-len(rb):], rb)
+	copy(s32[32-len(sb):], sb)
+
 	sig := &Signature{
-		R: rb,
-		S: sb,
+		R: r32[:],
+		S: s32[:],
 	}
 
 	enclavePub, err := UnmarshalPublicKey(sn.ga.X, sn.ga.Y)
@@ -190,7 +195,7 @@ func (sn *Session) CreateMsg2() (*Msg2, error) {
 		Signature: sig,
 	}
 
-	rlSize, sigRl, err := sn.ias.GetRevocationList(sn.gid)
+	sigRl, err := sn.ias.GetRevocationList(sn.gid)
 	if err != nil {
 		return nil, err
 	}
@@ -198,7 +203,7 @@ func (sn *Session) CreateMsg2() (*Msg2, error) {
 	msg2 := &Msg2{
 		A:         a,
 		CmacA:     sn.cmacA(a),
-		SigRlSize: uint32(rlSize),
+		SigRlSize: uint32(len(sigRl)),
 		SigRl:     sigRl,
 	}
 
@@ -235,10 +240,8 @@ func (sn *Session) ProcessMsg3(msg3 *Msg3) error {
 		return errors.New("Hash mismatch on report.")
 	}
 
-	if ok, err := sn.ias.VerifyQuote(msg3.M.Quote); err != nil {
-		return errors.New("IAS failed to verify the quote.")
-	} else if !ok {
-		return errors.New("Invalid quote.")
+	if err := sn.ias.VerifyQuote(msg3.M.Quote); err != nil {
+		return err
 	}
 
 	sn.sk = deriveLabelKeyFromBase(sn.kdk, SK_LABEL)
