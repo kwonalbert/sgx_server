@@ -113,23 +113,7 @@ func readSPID(shex string) []byte {
 	return spid
 }
 
-// Read the configuration file, and generate the internal
-// configuration to initialize the session manager.
-// It will fail with log.Fatal if it could not parse the config.
-func ReadConfiguration(fileName string) *configuration {
-	file, err := os.Open(fileName)
-	if err != nil {
-		log.Fatal("Could not open configuration file:", err)
-	}
-	defer file.Close()
-
-	config := &Configuration{}
-	decoder := json.NewDecoder(file)
-	err = decoder.Decode(config)
-	if err != nil {
-		log.Fatal("Could not json decode the config file:", err)
-	}
-
+func parseConfiguration(config *Configuration) *configuration {
 	passwd := ""
 	if config.LongTermKeyEncrypted {
 		if config.LongTermKeyPassword != "" {
@@ -149,4 +133,24 @@ func ReadConfiguration(fileName string) *configuration {
 		maxSessions:       config.MaxSessions,
 		timeout:           config.Timeout,
 	}
+}
+
+// Read the configuration file, and generate the internal
+// configuration to initialize the session manager.
+// It will fail with log.Fatal if it could not parse the config.
+func ReadConfiguration(fileName string) *Configuration {
+	file, err := os.Open(fileName)
+	if err != nil {
+		log.Fatal("Could not open configuration file:", err)
+	}
+	defer file.Close()
+
+	config := &Configuration{}
+	decoder := json.NewDecoder(file)
+	err = decoder.Decode(config)
+	if err != nil {
+		log.Fatal("Could not json decode the config file:", err)
+	}
+
+	return config
 }

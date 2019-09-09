@@ -344,3 +344,7 @@ func (sn *Session) Open(ciphertext []byte) ([]byte, error) {
 	sn.lastUsed = time.Now()
 	return sn.aes.Open(nil, ciphertext[:12], ciphertext[12:], nil)
 }
+
+func (sn *Session) MAC(msg []byte) []byte {
+	return cmacWithKey(msg, sn.smk)
+}

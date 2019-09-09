@@ -19,16 +19,18 @@ type SessionManager struct {
 	ias *IAS
 }
 
-func NewSessionManager(config *configuration) *SessionManager {
+func NewSessionManager(config *Configuration) *SessionManager {
 	sessions := make(map[uint64]*Session)
 	sessions[0] = nil
 
+	configInternal := *parseConfiguration(config)
+
 	sm := &SessionManager{
-		configuration: *config,
+		configuration: configInternal,
 
-		sessions: NewCache(config.maxSessions),
+		sessions: NewCache(configInternal.maxSessions),
 
-		ias: NewIAS(config.release, config.subscription, config.allowedAdvisories),
+		ias: NewIAS(configInternal.release, configInternal.subscription, configInternal.allowedAdvisories),
 	}
 
 	return sm
@@ -59,6 +61,9 @@ func (sm *SessionManager) NewSession(in *Request) (*Challenge, error) {
 		}
 
 		id = binary.BigEndian.Uint64(bytes[:])
+		if id == 0 { // id of zero is reserved for non-sgx clients
+			continue
+		}
 		if _, ok := sm.GetSession(id); !ok {
 			break
 		}
