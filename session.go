@@ -10,6 +10,7 @@ import (
 	"errors"
 	fmt "fmt"
 	"log"
+	"time"
 
 	"github.com/aead/cmac"
 )
@@ -37,6 +38,8 @@ type Session struct {
 	// if sealCount goes over 2^{32}, it will throw an error
 	aes       cipher.AEAD
 	sealCount int
+
+	lastUsed time.Time
 }
 
 const MSG4_SECRET = "REPLACE_ME_WITH_REAL_SECRET"
@@ -57,8 +60,7 @@ const UNLINKABLE_QUOTE_INT = 0
 const LINKABLE_QUOTE_INT = 1
 const KDF_ID_INT = 1
 
-func NewSession(mrenclaves [][32]byte, id uint64, spid []byte,
-	longTermKey *ecdsa.PrivateKey, ias *IAS) *Session {
+func NewSession(mrenclaves [][32]byte, id uint64, spid []byte, longTermKey *ecdsa.PrivateKey, ias *IAS) *Session {
 	s := &Session{
 		ias:        ias,
 		mrenclaves: mrenclaves,
@@ -143,6 +145,8 @@ func (sn *Session) ProcessMsg1(msg1 *Msg1) error {
 	sn.exgid = msg1.Msg0.Exgid
 	sn.ga = msg1.Ga
 	sn.gid = msg1.Gid
+
+	sn.lastUsed = time.Now()
 	return nil
 }
 
@@ -207,10 +211,13 @@ func (sn *Session) CreateMsg2() (*Msg2, error) {
 		SigRl:     sigRl,
 	}
 
+	sn.lastUsed = time.Now()
 	return msg2, nil
 }
 
 func (sn *Session) ProcessMsg3(msg3 *Msg3) error {
+	sn.vk = deriveLabelKeyFromBase(sn.kdk, VK_LABEL)
+
 	if !bytes.Equal(msg3.M.Ga.X, sn.ga.X) {
 		fmt.Println("X", msg3.M.Ga.X, sn.ga.X)
 		return errors.New("Msg3 GA mismatch.")
@@ -219,6 +226,8 @@ func (sn *Session) ProcessMsg3(msg3 *Msg3) error {
 		return errors.New("Msg3 GA mismatch.")
 	} else if !bytes.Equal(sn.cmacM(msg3.M), msg3.CmacM) {
 		return errors.New("Msg3 MAC on M mismatch.")
+	} else if !bytes.Equal(sn.hashReport(), msg3.M.Quote[368:368+32]) {
+		return errors.New("Hash mismatch on report.")
 	}
 
 	var mr [32]byte
@@ -233,11 +242,6 @@ func (sn *Session) ProcessMsg3(msg3 *Msg3) error {
 	}
 	if !found {
 		return errors.New("Invalid MREnclave.")
-	}
-
-	sn.vk = deriveLabelKeyFromBase(sn.kdk, VK_LABEL)
-	if !bytes.Equal(sn.hashReport(), msg3.M.Quote[368:368+32]) {
-		return errors.New("Hash mismatch on report.")
 	}
 
 	if err := sn.ias.VerifyQuote(msg3.M.Quote); err != nil {
@@ -256,17 +260,21 @@ func (sn *Session) ProcessMsg3(msg3 *Msg3) error {
 		return err
 	}
 
+	// TODO: check DEBUG in the quote
+	sn.lastUsed = time.Now()
 	return nil
 }
 
 func (sn *Session) CreateMsg4() (*Msg4, error) {
-	// this overwrites secret with the encrypted version
 	secret := []byte(MSG4_SECRET)
 	ciphertext, err := sn.Seal(secret)
 	if err != nil {
 		return nil, err
 	}
 
+	// if it reaches this point, then the enclave must be trusted.
+	// TODO: actually check whether PSE is trusted or not.
+	// TODO: generate a Pib if EnclaveTrusted is not true
 	msg4 := &Msg4{
 		EnclaveTrusted: true,
 		PseTrusted:     false,
@@ -292,9 +300,11 @@ func (sn *Session) Seal(msg []byte) ([]byte, error) {
 
 	ciphertext := sn.aes.Seal(nil, nonce, msg, nil)
 	sn.sealCount += 1
+	sn.lastUsed = time.Now()
 	return append(nonce, ciphertext...), nil
 }
 
 func (sn *Session) Open(ciphertext []byte) ([]byte, error) {
+	sn.lastUsed = time.Now()
 	return sn.aes.Open(nil, ciphertext[:12], ciphertext[12:], nil)
 }

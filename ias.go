@@ -79,7 +79,8 @@ func (ias *IAS) GetRevocationList(gid []byte) ([]byte, error) {
 }
 
 // passing in the body separately, since resp.Body is a Reader
-// which behaves like a stream
+// which behaves like a stream. if we wanted to pass a Reader type,
+// we'd have to create a new one.
 func (ias *IAS) verifyResponseSignature(resp *http.Response, body []byte) error {
 	sig, err := base64.StdEncoding.DecodeString(resp.Header.Get("x-iasreport-signature"))
 	if err != nil {
@@ -91,7 +92,9 @@ func (ias *IAS) verifyResponseSignature(resp *http.Response, body []byte) error 
 		return err
 	}
 
-	// the first block is the key used to verify the signature
+	// the first block is the key used to verify the signature.
+	// this currently assumes that Intel always returns the right cert,
+	// and that we verify Intel's identity when we connect to it via TLS.
 	block, _ := pem.Decode([]byte(unescaped))
 	if block == nil {
 		return errors.New("Failed to get the IAS certificate for signature verification.")
