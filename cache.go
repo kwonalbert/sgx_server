@@ -26,13 +26,13 @@ func NewCache(capacity int) *cache {
 func (c *cache) Set(key uint64, session *Session) {
 	c.Lock()
 	defer c.Unlock()
-
 	elem := c.queue.PushFront(session)
 	c.items[key] = elem
 
 	// -1 indicates infinite capacity
 	if c.queue.Len() > c.capacity && c.capacity != -1 {
-		c.queue.Remove(c.queue.Front())
+		delete(c.items, c.queue.Back().Value.(*Session).id)
+		c.queue.Remove(c.queue.Back())
 	}
 }
 
