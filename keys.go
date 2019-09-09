@@ -66,10 +66,13 @@ func reverse(b []byte) {
 }
 
 func MarshalPublicKey(pub *ecdsa.PublicKey) ([]byte, []byte, error) {
+	var x32, y32 [32]byte
 	xb, yb := pub.X.Bytes(), pub.Y.Bytes()
-	reverse(xb)
-	reverse(yb)
-	return xb, yb, nil
+	copy(x32[:], xb)
+	copy(y32[:], yb)
+	reverse(x32[:])
+	reverse(y32[:])
+	return x32[:], y32[:], nil
 }
 
 func UnmarshalPublicKey(xb, yb []byte) (*ecdsa.PublicKey, error) {
