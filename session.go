@@ -16,8 +16,9 @@ import (
 )
 
 type Session struct {
-	id  uint64
-	ias *IAS
+	id      uint64
+	ias     *IAS
+	timeout int
 
 	mrenclaves  [][32]byte
 	spid        []byte
@@ -60,10 +61,11 @@ const UNLINKABLE_QUOTE_INT = 0
 const LINKABLE_QUOTE_INT = 1
 const KDF_ID_INT = 1
 
-func NewSession(id uint64, ias *IAS, mrenclaves [][32]byte, spid []byte, longTermKey *ecdsa.PrivateKey) *Session {
+func NewSession(id uint64, ias *IAS, timeout int, mrenclaves [][32]byte, spid []byte, longTermKey *ecdsa.PrivateKey) *Session {
 	s := &Session{
 		ias:        ias,
 		mrenclaves: mrenclaves,
+		timeout:    timeout,
 
 		id:          id,
 		spid:        spid,
@@ -72,6 +74,8 @@ func NewSession(id uint64, ias *IAS, mrenclaves [][32]byte, spid []byte, longTer
 		ephKey: generateKey(),
 
 		sealCount: 0,
+
+		lastUsed: time.Now(),
 	}
 	return s
 }
@@ -137,8 +141,22 @@ func (sn *Session) hashReport() []byte {
 	return hash[:]
 }
 
+func (sn *Session) expired() error {
+	if sn.timeout == -1 { // timeout == -1 means it never expires
+		return nil
+	}
+
+	now := time.Now()
+	if now.After(sn.lastUsed.Add(time.Duration(sn.timeout) * time.Minute)) {
+		return errors.New(fmt.Sprintf("Session [%d] timed out", sn.id))
+	}
+	return nil
+}
+
 func (sn *Session) ProcessMsg1(msg1 *Msg1) error {
-	if !checkMsg1Format(msg1) {
+	if err := sn.expired(); err != nil {
+		return err
+	} else if !checkMsg1Format(msg1) {
 		return errors.New("Malformed message 1")
 	}
 
@@ -151,6 +169,10 @@ func (sn *Session) ProcessMsg1(msg1 *Msg1) error {
 }
 
 func (sn *Session) CreateMsg2() (*Msg2, error) {
+	if err := sn.expired(); err != nil {
+		return nil, err
+	}
+
 	gbx, gby, err := marshalPublicKey(&sn.ephKey.PublicKey)
 	if err != nil {
 		return nil, err
@@ -216,6 +238,10 @@ func (sn *Session) CreateMsg2() (*Msg2, error) {
 }
 
 func (sn *Session) ProcessMsg3(msg3 *Msg3) error {
+	if err := sn.expired(); err != nil {
+		return err
+	}
+
 	sn.vk = deriveLabelKeyFromBase(sn.kdk, VK_LABEL)
 
 	if !bytes.Equal(msg3.M.Ga.X, sn.ga.X) {
@@ -266,6 +292,10 @@ func (sn *Session) ProcessMsg3(msg3 *Msg3) error {
 }
 
 func (sn *Session) CreateMsg4() (*Msg4, error) {
+	if err := sn.expired(); err != nil {
+		return nil, err
+	}
+
 	secret := []byte(MSG4_SECRET)
 	ciphertext, err := sn.Seal(secret)
 	if err != nil {
@@ -286,7 +316,9 @@ func (sn *Session) CreateMsg4() (*Msg4, error) {
 }
 
 func (sn *Session) Seal(msg []byte) ([]byte, error) {
-	if sn.sealCount > (1 << 32) {
+	if err := sn.expired(); err != nil {
+		return nil, err
+	} else if sn.sealCount > (1 << 32) {
 		return nil, errors.New("Sealed too many messages")
 	}
 
@@ -305,6 +337,10 @@ func (sn *Session) Seal(msg []byte) ([]byte, error) {
 }
 
 func (sn *Session) Open(ciphertext []byte) ([]byte, error) {
+	if err := sn.expired(); err != nil {
+		return nil, err
+	}
+
 	sn.lastUsed = time.Now()
 	return sn.aes.Open(nil, ciphertext[:12], ciphertext[12:], nil)
 }

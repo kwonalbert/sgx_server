@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"log"
-	"sync"
 )
 
 // SessionManager basically implements (though not exactly) the
@@ -15,8 +14,7 @@ import (
 type SessionManager struct {
 	configuration
 
-	sessions map[uint64]*Session
-	sLock    *sync.RWMutex
+	sessions *cache
 
 	ias *IAS
 }
@@ -28,19 +26,16 @@ func NewSessionManager(config *configuration) *SessionManager {
 	sm := &SessionManager{
 		configuration: *config,
 
-		sessions: sessions,
-		sLock:    new(sync.RWMutex),
+		sessions: NewCache(config.maxSessions),
 
 		ias: NewIAS(config.release, config.subscription, config.allowedAdvisories),
 	}
+
 	return sm
 }
 
 func (sm *SessionManager) GetSession(id uint64) (*Session, bool) {
-	sm.sLock.RLock()
-	defer sm.sLock.RUnlock()
-	session, ok := sm.sessions[id]
-	return session, ok
+	return sm.sessions.Get(id)
 }
 
 func (sm *SessionManager) NewSession(in *Request) (*Challenge, error) {
@@ -52,7 +47,7 @@ func (sm *SessionManager) NewSession(in *Request) (*Challenge, error) {
 		return nil, errors.New("Could not generate a challenge")
 	}
 
-	// generate a unique id for the session
+	// generate a unique id for the session.
 	id := uint64(0)
 	var bytes [8]byte
 	for true {
@@ -70,9 +65,7 @@ func (sm *SessionManager) NewSession(in *Request) (*Challenge, error) {
 	}
 	log.Println("Creating new session:", id)
 
-	sm.sLock.Lock()
-	sm.sessions[id] = NewSession(id, sm.ias, sm.mrenclaves, sm.spid, sm.longTermKey)
-	sm.sLock.Unlock()
+	sm.sessions.Set(id, NewSession(id, sm.ias, sm.timeout, sm.mrenclaves, sm.spid, sm.longTermKey))
 
 	return &Challenge{
 		SessionId: id,
@@ -86,11 +79,21 @@ func (sm *SessionManager) Msg1ToMsg2(msg1 *Msg1) (*Msg2, error) {
 		return nil, errors.New("Session not found")
 	}
 
+	// if msgs are invalid, or if we fail to create the message
+	// (e.g., due to timeout), then the session is removed from
+	// the list.
 	err := session.ProcessMsg1(msg1)
 	if err != nil {
+		sm.sessions.Delete(msg1.SessionId)
 		return nil, err
 	}
-	return session.CreateMsg2()
+
+	msg2, err := session.CreateMsg2()
+	if err != nil {
+		sm.sessions.Delete(msg1.SessionId)
+	}
+
+	return msg2, err
 }
 
 func (sm *SessionManager) Msg3ToMsg4(msg3 *Msg3) (*Msg4, error) {
@@ -99,10 +102,17 @@ func (sm *SessionManager) Msg3ToMsg4(msg3 *Msg3) (*Msg4, error) {
 		return nil, errors.New("Session not found")
 	}
 
-	// TODO: generate a proper Msg4 if an error happens during msg3
+	// TODO: generate a proper Msg4 if an error happens during msg3.
 	err := session.ProcessMsg3(msg3)
 	if err != nil {
+		sm.sessions.Delete(msg3.SessionId)
 		return nil, err
 	}
-	return session.CreateMsg4()
+
+	msg4, err := session.CreateMsg4()
+	if err != nil {
+		sm.sessions.Delete(msg3.SessionId)
+	}
+
+	return msg4, err
 }

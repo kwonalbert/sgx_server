@@ -50,13 +50,17 @@ type Configuration struct {
 	AllowedAdvisories map[string][]string
 
 	// The maximum number of concurrent sessions the session
-	// manager will keep alive.
+	// manager will keep alive. If MaxSessions is -1, then we
+	// allow unlimited number of sessions.
 	MaxSessions int
 
 	// A session times out after Timeout minutes.
 	// If there is no activity for this session within the past
 	// Timeout minutes, the manager will remove the session,
 	// and the client will have to reauthenticate itself.
+	// If Timeout is -1, then a session will never expire.
+	// except if there are more than MaxSessions sessions,
+	// then the oldest ones will be removed.
 	Timeout int
 }
 
