@@ -24,7 +24,7 @@ func exchange(mine *ecdsa.PrivateKey, peer *ecdsa.PublicKey) []byte {
 }
 
 // TODO: implement password
-func LoadPrivateKey(fileName string, password string) *ecdsa.PrivateKey {
+func loadPrivateKey(fileName string, password string) *ecdsa.PrivateKey {
 	pem_encoded, err := ioutil.ReadFile(fileName)
 	if err != nil {
 		log.Fatal("Could not open the private key file:", err)
@@ -40,7 +40,7 @@ func LoadPrivateKey(fileName string, password string) *ecdsa.PrivateKey {
 	return key.(*ecdsa.PrivateKey)
 }
 
-func LoadPublicKey(fileName string) *ecdsa.PublicKey {
+func loadPublicKey(fileName string) *ecdsa.PublicKey {
 	pem_encoded, err := ioutil.ReadFile(fileName)
 	if err != nil {
 		log.Fatal("Could not open the public key file:", err)
@@ -55,8 +55,8 @@ func LoadPublicKey(fileName string) *ecdsa.PublicKey {
 	return pub.(*ecdsa.PublicKey)
 }
 
-func LoadKeyPair(privFile string, pubFile string, password string) (*ecdsa.PrivateKey, *ecdsa.PublicKey) {
-	return LoadPrivateKey(privFile, password), LoadPublicKey(pubFile)
+func loadKeyPair(privFile string, pubFile string, password string) (*ecdsa.PrivateKey, *ecdsa.PublicKey) {
+	return loadPrivateKey(privFile, password), loadPublicKey(pubFile)
 }
 
 func reverse(b []byte) {
@@ -65,7 +65,7 @@ func reverse(b []byte) {
 	}
 }
 
-func MarshalPublicKey(pub *ecdsa.PublicKey) ([]byte, []byte, error) {
+func marshalPublicKey(pub *ecdsa.PublicKey) ([]byte, []byte, error) {
 	var x32, y32 [32]byte
 	xb, yb := pub.X.Bytes(), pub.Y.Bytes()
 	copy(x32[:], xb)
@@ -75,7 +75,7 @@ func MarshalPublicKey(pub *ecdsa.PublicKey) ([]byte, []byte, error) {
 	return x32[:], y32[:], nil
 }
 
-func UnmarshalPublicKey(xb, yb []byte) (*ecdsa.PublicKey, error) {
+func unmarshalPublicKey(xb, yb []byte) (*ecdsa.PublicKey, error) {
 	// to big endian
 	reverse(xb)
 	reverse(yb)

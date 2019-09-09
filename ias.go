@@ -14,22 +14,51 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strings"
+)
+
+// URL for the IAS attestation API
+const (
+	// dev
+	DEBUG_IAS_HOST = "https://api.trustedservices.intel.com/sgx/dev/attestation/v3"
+	// prod
+	IAS_HOST = "https://api.trustedservices.intel.com/sgx/attestation/v3"
+)
+
+const (
+	HEADER_SUBSCRIPTION_KEY = "Ocp-Apim-Subscription-Key"
+)
+
+// fields of the isv returns
+const (
+	ISV_NONCE        = "nonce"
+	ISV_QUOTE        = "isvEnclaveQuote"
+	ISV_QUOTE_BODY   = "isvEnclaveQuoteBody"
+	ISV_QUOTE_STATUS = "isvEnclaveQuoteStatus"
+)
+
+// possible errors from quote verification
+const (
+	OK                   = "OK"
+	CONFIGURATION_NEEDED = "CONFIGURATION_NEEDED"
+	GROUP_OUT_OF_DATE    = "GROUP_OUT_OF_DATE"
+)
+
+// possible error strings from ias
+const (
+	quoteErr             = "Quote verification returned unallowed error [%s]."
+	quoteErrWithAdvisory = "Quote verification returned [%s] with unallowed advisories [%s]."
 )
 
 type IAS struct {
-	release      bool
-	host         string
-	subscription string
-	client       *http.Client
+	release           bool
+	host              string
+	subscription      string
+	allowedAdvisories map[string][]string
+	client            *http.Client
 }
 
-// dev
-const DEBUG_IAS_HOST = "https://api.trustedservices.intel.com/sgx/dev/attestation/v3"
-
-// prod
-const IAS_HOST = "https://api.trustedservices.intel.com/sgx/attestation/v3"
-
-func NewIAS(release bool, subscription string) *IAS {
+func NewIAS(release bool, subscription string, allowedAdvisories map[string][]string) *IAS {
 	host := DEBUG_IAS_HOST
 	if release {
 		host = IAS_HOST
@@ -38,10 +67,11 @@ func NewIAS(release bool, subscription string) *IAS {
 	client := &http.Client{}
 
 	ias := &IAS{
-		release:      release,
-		host:         host,
-		subscription: subscription,
-		client:       client,
+		release:           release,
+		host:              host,
+		subscription:      subscription,
+		allowedAdvisories: allowedAdvisories,
+		client:            client,
 	}
 	return ias
 }
@@ -55,7 +85,7 @@ func (ias *IAS) GetRevocationList(gid []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Ocp-Apim-Subscription-Key", ias.subscription)
+	req.Header.Set(HEADER_SUBSCRIPTION_KEY, ias.subscription)
 
 	resp, err := ias.client.Do(req)
 	if err != nil {
@@ -107,6 +137,36 @@ func (ias *IAS) verifyResponseSignature(resp *http.Response, body []byte) error 
 	return certs.CheckSignature(x509.SHA256WithRSA, body, sig)
 }
 
+func (ias *IAS) errorAllowed(status string, advisories string) error {
+	if _, ok := ias.allowedAdvisories[status]; !ok {
+		return errors.New(fmt.Sprintf(quoteErr, status))
+	}
+
+	// find the list of advisories that we consider critical
+	advs := strings.Split(advisories, ",")
+	var notAllowed []string
+	allowed := ias.allowedAdvisories[status]
+	for _, adv := range advs {
+		found := false
+		for _, good := range allowed {
+			if adv == good {
+				found = true
+			}
+		}
+
+		if !found {
+			notAllowed = append(notAllowed, adv)
+		}
+	}
+
+	if len(notAllowed) == 0 {
+		// no bad advisories found
+		return nil
+	} else {
+		return errors.New(fmt.Sprintf(quoteErrWithAdvisory, status, strings.Join(notAllowed, ", ")))
+	}
+}
+
 func (ias *IAS) VerifyQuote(quote []byte) error {
 	url := ias.host + "/report"
 
@@ -119,10 +179,10 @@ func (ias *IAS) VerifyQuote(quote []byte) error {
 
 	bodyMap := make(map[string]string)
 	hexQuote := base64.StdEncoding.EncodeToString(quote)
-	bodyMap["isvEnclaveQuote"] = hexQuote
+	bodyMap[ISV_QUOTE] = hexQuote
 	//bodyMap["pseManifest"]
 	hexNonce := hex.EncodeToString(nonce[:])
-	bodyMap["nonce"] = hexNonce
+	bodyMap[ISV_NONCE] = hexNonce
 
 	body := bytes.NewBuffer(nil)
 	encoder := json.NewEncoder(body)
@@ -134,7 +194,7 @@ func (ias *IAS) VerifyQuote(quote []byte) error {
 		return err
 	}
 
-	req.Header.Set("Ocp-Apim-Subscription-Key", ias.subscription)
+	req.Header.Set(HEADER_SUBSCRIPTION_KEY, ias.subscription)
 	// need to manually set it to json content type!
 	req.Header.Set("Content-Type", "application/json")
 
@@ -158,28 +218,22 @@ func (ias *IAS) VerifyQuote(quote []byte) error {
 		return err
 	}
 
-	if hexNonce != report["nonce"].(string) {
+	if hexNonce != report[ISV_NONCE].(string) {
 		return errors.New("Incorrect nonce from IAS.")
-	}
-
-	retQuote := report["isvEnclaveQuoteBody"].(string)
-	if len(retQuote) < 432 || hexQuote[:len(retQuote)] != retQuote {
-		return errors.New("Incorrect quote returned from IAS.")
-	}
-
-	if report["isvEnclaveQuoteStatus"].(string) != "OK" {
-		if report["isvEnclaveQuoteStatus"].(string) == "CONFIGURATION_NEEDED" {
-			log.Println("Requires client configuration (likely due to hyperthreading).")
-		} else if report["isvEnclaveQuoteStatus"].(string) == "GROUP_OUT_OF_DATE" {
-			// parse the advisory code and report
-			log.Println("Client processor is too old.")
-		} else {
-			return errors.New("Unknown enclave status.")
-		}
 	}
 
 	if err := ias.verifyResponseSignature(resp, reportBytes); err != nil {
 		return err
+	}
+
+	retQuote := report[ISV_QUOTE_BODY].(string)
+	if len(retQuote) < 432 || hexQuote[:len(retQuote)] != retQuote {
+		return errors.New("Incorrect quote returned from IAS.")
+	}
+
+	status := report[ISV_QUOTE_STATUS].(string)
+	if status != OK {
+		return ias.errorAllowed(status, resp.Header.Get("advisory-ids"))
 	}
 
 	return nil

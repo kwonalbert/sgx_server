@@ -15,14 +15,10 @@ import (
 )
 
 var (
-	release = flag.Bool("release", false, "SGX release mode indicator")
-	port    = flag.String("port", "50051", "Port of this server")
-	spid    = flag.String("spid", "spid", "File containing the SPID")
-	mr      = flag.String("mr", "mrenclaves", "Directory containing all valid MRs")
-	ltKey   = flag.String("ltKey", "server_private.pem", "PEM encoded long private key of the server")
-	sub     = flag.String("sub", "subscription", "Subscription key for IAS")
-	tlsKey  = flag.String("tlsKey", "tls_private.pem", "PEM encoded TLS private key of the server")
-	tlsPub  = flag.String("tlsPub", "tls_public.pem", "PEM encoded TLS public key of the server")
+	config = flag.String("config", "config.json", "JSON configuration file")
+	port   = flag.String("port", "50051", "Port of this server")
+	tlsKey = flag.String("tlsKey", "tls_private.pem", "PEM encoded TLS private key of the server")
+	tlsPub = flag.String("tlsPub", "tls_public.pem", "PEM encoded TLS public key of the server")
 )
 
 type server struct {
@@ -47,19 +43,14 @@ func (s *server) SendMsg3(ctx context.Context, in *sgx_server.Msg3) (*sgx_server
 func main() {
 	flag.Parse()
 
-	ltPriv := sgx_server.LoadPrivateKey(*ltKey, "")
-
 	creds, err := credentials.NewServerTLSFromFile(*tlsPub, *tlsKey)
 	if err != nil {
 		log.Fatal("Could not parse the TLS certificates")
 	}
 
-	mrenclaves := sgx_server.ReadMREnclaves(*mr)
-	subscription := sgx_server.ReadSubscription(*sub)
+	sm := sgx_server.NewSessionManager(sgx_server.ReadConfiguration(*config))
+
 	srv := grpc.NewServer(grpc.Creds(creds))
-
-	sm := sgx_server.NewSessionManager(*release, subscription, mrenclaves, sgx_server.ReadSPID(*spid), ltPriv)
-
 	lis, err := net.Listen("tcp", ":"+*port)
 	if err != nil {
 		log.Fatal("Could not listen:", *port, err)

@@ -4,31 +4,14 @@ import (
 	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
-	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"math/big"
 	"testing"
 )
 
-func TestLoadKey(t *testing.T) {
-	priv := loadPrivateKey("keys/server_private.pem", "")
-	pub := loadPublicKey("keys/server_public.pem")
-
-	var msg [32]byte
-	rand.Read(msg[:])
-
-	r, s, err := ecdsa.Sign(rand.Reader, priv, msg[:])
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if !ecdsa.Verify(pub, msg[:], r, s) {
-		t.Fatal("Mismatching keys.")
-	}
-}
-
 func TestECDHAndKeyDerivation(t *testing.T) {
+	// The inputs to this were generated using Python
 	p1 := "410e56df2bf25cb4008689565e359e0869def9393ddc57f0c6beccfb99bec136"
 	x1 := "0d670402220a94374fb0803ca4fbd7d9d5a43fd8850ffd92602aa7dcf5f70034"
 	y1 := "c919eca19436f2d9172831075ffb449e16b3a550be7995b43895e5c8cad659ac"
@@ -68,12 +51,12 @@ func TestECDHAndKeyDerivation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pub1, err := UnmarshalPublicKey(xb1, yb1)
+	pub1, err := unmarshalPublicKey(xb1, yb1)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	pub2, err := UnmarshalPublicKey(xb2, yb2)
+	pub2, err := unmarshalPublicKey(xb2, yb2)
 	if err != nil {
 		t.Fatal(err)
 	}

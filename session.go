@@ -8,7 +8,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"errors"
-	fmt "fmt"
+	"fmt"
 	"log"
 	"time"
 
@@ -16,10 +16,10 @@ import (
 )
 
 type Session struct {
-	ias        *IAS
-	mrenclaves [][32]byte
+	id  uint64
+	ias *IAS
 
-	id          uint64
+	mrenclaves  [][32]byte
 	spid        []byte
 	longTermKey *ecdsa.PrivateKey
 	exgid       uint32
@@ -60,7 +60,7 @@ const UNLINKABLE_QUOTE_INT = 0
 const LINKABLE_QUOTE_INT = 1
 const KDF_ID_INT = 1
 
-func NewSession(mrenclaves [][32]byte, id uint64, spid []byte, longTermKey *ecdsa.PrivateKey, ias *IAS) *Session {
+func NewSession(id uint64, ias *IAS, mrenclaves [][32]byte, spid []byte, longTermKey *ecdsa.PrivateKey) *Session {
 	s := &Session{
 		ias:        ias,
 		mrenclaves: mrenclaves,
@@ -151,7 +151,7 @@ func (sn *Session) ProcessMsg1(msg1 *Msg1) error {
 }
 
 func (sn *Session) CreateMsg2() (*Msg2, error) {
-	gbx, gby, err := MarshalPublicKey(&sn.ephKey.PublicKey)
+	gbx, gby, err := marshalPublicKey(&sn.ephKey.PublicKey)
 	if err != nil {
 		return nil, err
 	}
@@ -184,7 +184,7 @@ func (sn *Session) CreateMsg2() (*Msg2, error) {
 		S: s32[:],
 	}
 
-	enclavePub, err := UnmarshalPublicKey(sn.ga.X, sn.ga.Y)
+	enclavePub, err := unmarshalPublicKey(sn.ga.X, sn.ga.Y)
 	if err != nil {
 		return nil, err
 	}
