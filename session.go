@@ -337,5 +337,5 @@ func (sn *Session) Open(ciphertext []byte) ([]byte, error) {
 }
 
 func (sn *Session) MAC(msg []byte) []byte {
-	return cmacWithKey(msg, sn.smk)
+	return cmacWithKey(msg, sn.mk)
 }
