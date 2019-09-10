@@ -84,6 +84,10 @@ func readMREnclaves(dir string) [][32]byte {
 
 	mrenclaves := make([][32]byte, len(mrs))
 	for i, mr := range mrs {
+		if mr.Name() == ".gitignore" {
+			continue
+		}
+
 		mhex, err := ioutil.ReadFile(path.Join(dir, mr.Name()))
 		if err != nil {
 			log.Fatal("Could not read the mrenclave.")
