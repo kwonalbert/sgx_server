@@ -7,7 +7,6 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/pem"
-	fmt "fmt"
 	"io/ioutil"
 	"log"
 	"math/big"
@@ -15,18 +14,21 @@ import (
 	"github.com/aead/cmac"
 )
 
+// serialize a big int to always 32 byte, little endian
+func serializeBigInt(x *big.Int) []byte {
+	xb := x.Bytes()
+	reverse(xb)
+	for len(xb) < 32 {
+		xb = append(xb, 0)
+	}
+	return xb
+}
+
 func exchange(mine *ecdsa.PrivateKey, peer *ecdsa.PublicKey) []byte {
 	curve := elliptic.P256()
 	// only x is used as the result of key exchange
 	x, _ := curve.ScalarMult(peer.X, peer.Y, mine.D.Bytes())
-	xb := x.Bytes()
-	if len(xb) < 32 {
-		fmt.Println("Edge case")
-	}
-	var ret [32]byte
-	copy(ret[32-len(xb):], xb)
-	reverse(ret[:])
-	return ret[:]
+	return serializeBigInt(x)
 }
 
 // TODO: implement password
@@ -72,13 +74,7 @@ func reverse(b []byte) {
 }
 
 func marshalPublicKey(pub *ecdsa.PublicKey) ([]byte, []byte, error) {
-	var x32, y32 [32]byte
-	xb, yb := pub.X.Bytes(), pub.Y.Bytes()
-	copy(x32[32-len(xb):], xb)
-	copy(y32[32-len(yb):], yb)
-	reverse(x32[:])
-	reverse(y32[:])
-	return x32[:], y32[:], nil
+	return serializeBigInt(pub.X), serializeBigInt(pub.Y), nil
 }
 
 func unmarshalPublicKey(xb, yb []byte) (*ecdsa.PublicKey, error) {

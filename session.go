@@ -192,18 +192,9 @@ func (sn *Session) CreateMsg2() (*Msg2, error) {
 		return nil, err
 	}
 
-	// sometimes r and s are less than 32 bytes, but we need it to be exact
-	var r32, s32 [32]byte
-	rb, sb := r.Bytes(), s.Bytes()
-	// convert to little endian
-	reverse(rb)
-	reverse(sb)
-	copy(r32[32-len(rb):], rb)
-	copy(s32[32-len(sb):], sb)
-
 	sig := &Signature{
-		R: r32[:],
-		S: s32[:],
+		R: serializeBigInt(r),
+		S: serializeBigInt(s),
 	}
 
 	enclavePub, err := unmarshalPublicKey(sn.ga.X, sn.ga.Y)
