@@ -14,16 +14,7 @@ import (
 	"github.com/aead/cmac"
 )
 
-// serialize a big int to always 32 byte, little endian
-func serializeBigInt(x *big.Int) []byte {
-	xb := x.Bytes()
-	reverse(xb)
-	for len(xb) < 32 {
-		xb = append(xb, 0)
-	}
-	return xb
-}
-
+// Diffie-Hellman key exchange
 func exchange(mine *ecdsa.PrivateKey, peer *ecdsa.PublicKey) []byte {
 	curve := elliptic.P256()
 	// only x is used as the result of key exchange
@@ -155,4 +146,14 @@ func deriveLabelKeyFromBase(base []byte, label []byte) []byte {
 		log.Fatal("Could not derive the KDK", err)
 	}
 	return key
+}
+
+// serialize a big int to always 32 byte, little endian
+func serializeBigInt(x *big.Int) []byte {
+	xb := x.Bytes()
+	reverse(xb)
+	for len(xb) < 32 {
+		xb = append(xb, 0)
+	}
+	return xb
 }

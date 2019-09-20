@@ -22,7 +22,7 @@ var (
 )
 
 type server struct {
-	sm *sgx_server.SessionManager
+	sm sgx_server.SessionManager
 }
 
 func (s *server) StartAttestation(ctx context.Context, in *sgx_server.Request) (*sgx_server.Challenge, error) {

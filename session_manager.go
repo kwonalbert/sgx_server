@@ -11,21 +11,31 @@ import (
 // AttestationServer interface, and higher level codes can use it to
 // quickly instantiate an AttestationServer. See the server in
 // cmd/server for examples on how to do this.
-type SessionManager struct {
-	configuration
+type SessionManager interface {
+	GetSession(id uint64) (Session, bool)
 
-	sessions *cache
+	NewSession(in *Request) (*Challenge, error)
 
-	ias *IAS
+	Msg1ToMsg2(msg1 *Msg1) (*Msg2, error)
+
+	Msg3ToMsg4(msg3 *Msg3) (*Msg4, error)
 }
 
-func NewSessionManager(config *Configuration) *SessionManager {
-	sessions := make(map[uint64]*Session)
+type sessionManager struct {
+	configuration
+
+	sessions Cache
+
+	ias IAS
+}
+
+func NewSessionManager(config *Configuration) SessionManager {
+	sessions := make(map[uint64]Session)
 	sessions[0] = nil
 
 	configInternal := *parseConfiguration(config)
 
-	sm := &SessionManager{
+	sm := &sessionManager{
 		configuration: configInternal,
 
 		sessions: NewCache(configInternal.maxSessions),
@@ -36,11 +46,11 @@ func NewSessionManager(config *Configuration) *SessionManager {
 	return sm
 }
 
-func (sm *SessionManager) GetSession(id uint64) (*Session, bool) {
+func (sm *sessionManager) GetSession(id uint64) (Session, bool) {
 	return sm.sessions.Get(id)
 }
 
-func (sm *SessionManager) NewSession(in *Request) (*Challenge, error) {
+func (sm *sessionManager) NewSession(in *Request) (*Challenge, error) {
 	var challenge [32]byte
 	n, err := rand.Read(challenge[:])
 	if err != nil {
@@ -49,7 +59,7 @@ func (sm *SessionManager) NewSession(in *Request) (*Challenge, error) {
 		return nil, errors.New("Could not generate a challenge")
 	}
 
-	// generate a unique id for the session.
+	// Generate a non-zero unique id for the session. 0 is reserved.
 	id := uint64(0)
 	var bytes [8]byte
 	for true {
@@ -61,7 +71,7 @@ func (sm *SessionManager) NewSession(in *Request) (*Challenge, error) {
 		}
 
 		id = binary.BigEndian.Uint64(bytes[:])
-		if id == 0 { // id of zero is reserved for non-sgx clients
+		if id == 0 {
 			continue
 		}
 		if _, ok := sm.GetSession(id); !ok {
@@ -78,7 +88,7 @@ func (sm *SessionManager) NewSession(in *Request) (*Challenge, error) {
 	}, nil
 }
 
-func (sm *SessionManager) Msg1ToMsg2(msg1 *Msg1) (*Msg2, error) {
+func (sm *sessionManager) Msg1ToMsg2(msg1 *Msg1) (*Msg2, error) {
 	session, ok := sm.GetSession(msg1.SessionId)
 	if !ok {
 		return nil, errors.New("Session not found")
@@ -101,7 +111,7 @@ func (sm *SessionManager) Msg1ToMsg2(msg1 *Msg1) (*Msg2, error) {
 	return msg2, err
 }
 
-func (sm *SessionManager) Msg3ToMsg4(msg3 *Msg3) (*Msg4, error) {
+func (sm *sessionManager) Msg3ToMsg4(msg3 *Msg3) (*Msg4, error) {
 	session, ok := sm.GetSession(msg3.SessionId)
 	if !ok {
 		return nil, errors.New("Session not found")

@@ -15,34 +15,6 @@ import (
 	"github.com/aead/cmac"
 )
 
-type Session struct {
-	id      uint64
-	ias     *IAS
-	timeout int
-
-	mrenclaves  [][32]byte
-	spid        []byte
-	longTermKey *ecdsa.PrivateKey
-	exgid       uint32
-	gid         []byte
-	ga          *PublicKey
-	gb          *PublicKey
-
-	// various session keys
-	ephKey *ecdsa.PrivateKey
-	kdk    []byte
-	smk    []byte // MAC key
-	vk     []byte
-	sk     []byte
-	mk     []byte
-
-	// if sealCount goes over 2^{32}, it will throw an error
-	aes       cipher.AEAD
-	sealCount int
-
-	lastUsed time.Time
-}
-
 const MSG4_SECRET = "REPLACE_ME_WITH_REAL_SECRET"
 
 const EC_COORD_SIZE = 32
@@ -61,8 +33,56 @@ const UNLINKABLE_QUOTE_INT = 0
 const LINKABLE_QUOTE_INT = 1
 const KDF_ID_INT = 1
 
-func NewSession(id uint64, ias *IAS, timeout int, mrenclaves [][32]byte, spid []byte, longTermKey *ecdsa.PrivateKey) *Session {
-	s := &Session{
+type Session interface {
+	Id() uint64
+
+	ProcessMsg1(msg1 *Msg1) error
+
+	CreateMsg2() (*Msg2, error)
+
+	ProcessMsg3(msg3 *Msg3) error
+
+	CreateMsg4() (*Msg4, error)
+
+	Seal(msg []byte) ([]byte, error)
+
+	Open(ciphertext []byte) ([]byte, error)
+
+	MAC(msg []byte) []byte
+}
+
+type session struct {
+	id      uint64
+	ias     IAS
+	timeout int
+
+	mrenclaves  [][32]byte
+	spid        []byte
+	longTermKey *ecdsa.PrivateKey
+	exgid       uint32
+	gid         []byte
+	ga          *PublicKey
+	gb          *PublicKey
+
+	// Various session keys.
+	ephKey *ecdsa.PrivateKey
+	kdk    []byte
+	smk    []byte
+	vk     []byte
+	sk     []byte
+	mk     []byte
+
+	aes cipher.AEAD
+
+	// Count the number of encryption operations done in this session.
+	// If sealCount goes over 2^{32}, it will throw an error.
+	sealCount int
+
+	lastUsed time.Time
+}
+
+func NewSession(id uint64, ias IAS, timeout int, mrenclaves [][32]byte, spid []byte, longTermKey *ecdsa.PrivateKey) Session {
+	s := &session{
 		ias:        ias,
 		mrenclaves: mrenclaves,
 		timeout:    timeout,
@@ -80,80 +100,11 @@ func NewSession(id uint64, ias *IAS, timeout int, mrenclaves [][32]byte, spid []
 	return s
 }
 
-func checkMsg1Format(msg1 *Msg1) bool {
-	return len(msg1.Ga.X) == EC_COORD_SIZE &&
-		len(msg1.Ga.Y) == EC_COORD_SIZE &&
-		len(msg1.Gid) == EPID_GID_SIZE &&
-		msg1.Msg0.SessionId == msg1.SessionId
+func (sn *session) Id() uint64 {
+	return sn.id
 }
 
-func cmacWithKey(msg, key []byte) []byte {
-	block, err := aes.NewCipher(key[:])
-	if err != nil {
-		log.Fatal("Could not create AES for CMAC", err)
-	}
-
-	result, err := cmac.Sum(msg, block, aes.BlockSize)
-	if err != nil {
-		log.Fatal("Could not CMAC the message.")
-	}
-	return result
-}
-
-func (sn *Session) cmacA(a *A) []byte {
-	concat := append(a.Gb.X, a.Gb.Y...)
-	concat = append(concat, a.Spid...)
-	concat = append(concat, a.QuoteType...)
-	concat = append(concat, a.KdfId...)
-	concat = append(concat, a.Signature.R...)
-	concat = append(concat, a.Signature.S...)
-	return cmacWithKey(concat, sn.smk)
-}
-
-func (sn *Session) cmacM(m *M) []byte {
-	concat := append(m.Ga.X, m.Ga.Y...)
-	concat = append(concat, m.PsSecurityProp...)
-	concat = append(concat, m.Quote...)
-	return cmacWithKey(concat, sn.smk)
-}
-
-func (sn *Session) cmacMsg4(msg4 *Msg4) []byte {
-	b1 := []byte{0}
-	if msg4.EnclaveTrusted {
-		b1[0] = 1
-	}
-	b2 := []byte{0}
-	if msg4.PseTrusted {
-		b2[0] = 1
-	}
-	concat := append(b1, b2...)
-	concat = append(concat, msg4.Pib...)
-	concat = append(concat, msg4.Secret...)
-	return cmacWithKey(concat, sn.smk)
-}
-
-func (sn *Session) hashReport() []byte {
-	concat := append(sn.ga.X, sn.ga.Y...)
-	concat = append(concat, sn.gb.X...)
-	concat = append(concat, sn.gb.Y...)
-	concat = append(concat, sn.vk...)
-	hash := sha256.Sum256(concat)
-	return hash[:]
-}
-
-func (sn *Session) expired() error {
-	if sn.timeout == -1 { // timeout == -1 means it never expires
-		return nil
-	}
-
-	now := time.Now()
-	if now.After(sn.lastUsed.Add(time.Duration(sn.timeout) * time.Minute)) {
-		return errors.New(fmt.Sprintf("Session [%d] timed out", sn.id))
-	}
-	return nil
-}
-
-func (sn *Session) ProcessMsg1(msg1 *Msg1) error {
+func (sn *session) ProcessMsg1(msg1 *Msg1) error {
 	if err := sn.expired(); err != nil {
 		return err
 	} else if !checkMsg1Format(msg1) {
@@ -168,7 +119,7 @@ func (sn *Session) ProcessMsg1(msg1 *Msg1) error {
 	return nil
 }
 
-func (sn *Session) CreateMsg2() (*Msg2, error) {
+func (sn *session) CreateMsg2() (*Msg2, error) {
 	if err := sn.expired(); err != nil {
 		return nil, err
 	}
@@ -228,7 +179,7 @@ func (sn *Session) CreateMsg2() (*Msg2, error) {
 	return msg2, nil
 }
 
-func (sn *Session) ProcessMsg3(msg3 *Msg3) error {
+func (sn *session) ProcessMsg3(msg3 *Msg3) error {
 	if err := sn.expired(); err != nil {
 		return err
 	}
@@ -282,7 +233,7 @@ func (sn *Session) ProcessMsg3(msg3 *Msg3) error {
 	return nil
 }
 
-func (sn *Session) CreateMsg4() (*Msg4, error) {
+func (sn *session) CreateMsg4() (*Msg4, error) {
 	if err := sn.expired(); err != nil {
 		return nil, err
 	}
@@ -306,7 +257,7 @@ func (sn *Session) CreateMsg4() (*Msg4, error) {
 	return msg4, nil
 }
 
-func (sn *Session) Seal(msg []byte) ([]byte, error) {
+func (sn *session) Seal(msg []byte) ([]byte, error) {
 	if err := sn.expired(); err != nil {
 		return nil, err
 	} else if sn.sealCount > (1 << 32) {
@@ -327,7 +278,7 @@ func (sn *Session) Seal(msg []byte) ([]byte, error) {
 	return append(nonce, ciphertext...), nil
 }
 
-func (sn *Session) Open(ciphertext []byte) ([]byte, error) {
+func (sn *session) Open(ciphertext []byte) ([]byte, error) {
 	if err := sn.expired(); err != nil {
 		return nil, err
 	}
@@ -336,6 +287,79 @@ func (sn *Session) Open(ciphertext []byte) ([]byte, error) {
 	return sn.aes.Open(nil, ciphertext[:12], ciphertext[12:], nil)
 }
 
-func (sn *Session) MAC(msg []byte) []byte {
+func (sn *session) MAC(msg []byte) []byte {
 	return cmacWithKey(msg, sn.mk)
+}
+
+func checkMsg1Format(msg1 *Msg1) bool {
+	return len(msg1.Ga.X) == EC_COORD_SIZE &&
+		len(msg1.Ga.Y) == EC_COORD_SIZE &&
+		len(msg1.Gid) == EPID_GID_SIZE &&
+		msg1.Msg0.SessionId == msg1.SessionId
+}
+
+func cmacWithKey(msg, key []byte) []byte {
+	block, err := aes.NewCipher(key[:])
+	if err != nil {
+		log.Fatal("Could not create AES for CMAC", err)
+	}
+
+	result, err := cmac.Sum(msg, block, aes.BlockSize)
+	if err != nil {
+		log.Fatal("Could not CMAC the message.")
+	}
+	return result
+}
+
+func (sn *session) cmacA(a *A) []byte {
+	concat := append(a.Gb.X, a.Gb.Y...)
+	concat = append(concat, a.Spid...)
+	concat = append(concat, a.QuoteType...)
+	concat = append(concat, a.KdfId...)
+	concat = append(concat, a.Signature.R...)
+	concat = append(concat, a.Signature.S...)
+	return cmacWithKey(concat, sn.smk)
+}
+
+func (sn *session) cmacM(m *M) []byte {
+	concat := append(m.Ga.X, m.Ga.Y...)
+	concat = append(concat, m.PsSecurityProp...)
+	concat = append(concat, m.Quote...)
+	return cmacWithKey(concat, sn.smk)
+}
+
+func (sn *session) cmacMsg4(msg4 *Msg4) []byte {
+	b1 := []byte{0}
+	if msg4.EnclaveTrusted {
+		b1[0] = 1
+	}
+	b2 := []byte{0}
+	if msg4.PseTrusted {
+		b2[0] = 1
+	}
+	concat := append(b1, b2...)
+	concat = append(concat, msg4.Pib...)
+	concat = append(concat, msg4.Secret...)
+	return cmacWithKey(concat, sn.smk)
+}
+
+func (sn *session) hashReport() []byte {
+	concat := append(sn.ga.X, sn.ga.Y...)
+	concat = append(concat, sn.gb.X...)
+	concat = append(concat, sn.gb.Y...)
+	concat = append(concat, sn.vk...)
+	hash := sha256.Sum256(concat)
+	return hash[:]
+}
+
+func (sn *session) expired() error {
+	if sn.timeout == -1 { // timeout == -1 means it never expires
+		return nil
+	}
+
+	now := time.Now()
+	if now.After(sn.lastUsed.Add(time.Duration(sn.timeout) * time.Minute)) {
+		return errors.New(fmt.Sprintf("Session [%d] timed out", sn.id))
+	}
+	return nil
 }

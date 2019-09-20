@@ -2,7 +2,7 @@ package sgx_server
 
 import "testing"
 
-func nilSession(id uint64) *Session {
+func nilSession(id uint64) Session {
 	return NewSession(id, nil, 0, nil, nil, nil)
 }
 

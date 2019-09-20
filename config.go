@@ -20,7 +20,7 @@ type Configuration struct {
 	Subscription string
 
 	// The directory that contains all the MREnclave files
-	// that are acceptable for this session.
+	// that are acceptable for this session manager.
 	Mrenclaves string
 
 	// Hex encoded SPID for IAS API. This can be found at
@@ -33,8 +33,9 @@ type Configuration struct {
 	// client enclave.
 	LongTermKey string
 
-	// If True, then it will prompt the user to type in the
-	// password to decrypt the long term key.
+	// If True, then it will either prompt the user to type in the
+	// password, or use LongTermKeyPassword field to decrypt the
+	// long term key.
 	LongTermKeyEncrypted bool
 
 	// If LongTermKeyEncrypted is true, and this password is set
@@ -44,8 +45,8 @@ type Configuration struct {
 	LongTermKeyPassword string
 
 	// AllowedAdvisories maps an error during quote verification
-	// to which advisories we are allowed to ignore. Valid keys
-	// are: ["CONFIGURATION_NEEDED", "GROUP_OUT_OF_DATE"].
+	// to which advisories we are allowed to ignore. Current valid
+	// keys are: ["CONFIGURATION_NEEDED", "GROUP_OUT_OF_DATE"].
 	// Be careful to not set this too liberally.
 	AllowedAdvisories map[string][]string
 

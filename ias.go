@@ -50,7 +50,13 @@ const (
 	quoteErrWithAdvisory = "Quote verification returned [%s] with unallowed advisories [%s]."
 )
 
-type IAS struct {
+type IAS interface {
+	GetRevocationList(gid []byte) ([]byte, error)
+
+	VerifyQuote(quote []byte) error
+}
+
+type ias struct {
 	release           bool
 	host              string
 	subscription      string
@@ -58,7 +64,7 @@ type IAS struct {
 	client            *http.Client
 }
 
-func NewIAS(release bool, subscription string, allowedAdvisories map[string][]string) *IAS {
+func NewIAS(release bool, subscription string, allowedAdvisories map[string][]string) IAS {
 	host := DEBUG_IAS_HOST
 	if release {
 		host = IAS_HOST
@@ -66,7 +72,7 @@ func NewIAS(release bool, subscription string, allowedAdvisories map[string][]st
 
 	client := &http.Client{}
 
-	ias := &IAS{
+	ias := &ias{
 		release:           release,
 		host:              host,
 		subscription:      subscription,
@@ -76,8 +82,8 @@ func NewIAS(release bool, subscription string, allowedAdvisories map[string][]st
 	return ias
 }
 
-func (ias *IAS) GetRevocationList(gid []byte) ([]byte, error) {
-	// sgx gives gid in little endian, but we need big endian
+func (ias *ias) GetRevocationList(gid []byte) ([]byte, error) {
+	// SGX gives gid in little endian, but we need big endian.
 	reverse(gid)
 	url := ias.host + "/sigrl/" + hex.EncodeToString(gid)
 	reverse(gid)
@@ -108,10 +114,10 @@ func (ias *IAS) GetRevocationList(gid []byte) ([]byte, error) {
 	return rl, nil
 }
 
-// passing in the body separately, since resp.Body is a Reader
-// which behaves like a stream. if we wanted to pass a Reader type,
-// we'd have to create a new one.
-func (ias *IAS) verifyResponseSignature(resp *http.Response, body []byte) error {
+func (ias *ias) verifyResponseSignature(resp *http.Response, body []byte) error {
+	// Passing in the body separately, since resp.Body is a Reader
+	// which behaves like a stream. if we wanted to pass a Reader type,
+	// we'd have to create a new one.
 	sig, err := base64.StdEncoding.DecodeString(resp.Header.Get("x-iasreport-signature"))
 	if err != nil {
 		return err
@@ -137,7 +143,8 @@ func (ias *IAS) verifyResponseSignature(resp *http.Response, body []byte) error 
 	return certs.CheckSignature(x509.SHA256WithRSA, body, sig)
 }
 
-func (ias *IAS) errorAllowed(status string, advisories string) error {
+// Check if the advisories we got from Intel are allowed.
+func (ias *ias) errorAllowed(status string, advisories string) error {
 	if _, ok := ias.allowedAdvisories[status]; !ok {
 		return errors.New(fmt.Sprintf(quoteErr, status))
 	}
@@ -167,7 +174,7 @@ func (ias *IAS) errorAllowed(status string, advisories string) error {
 	}
 }
 
-func (ias *IAS) VerifyQuote(quote []byte) error {
+func (ias *ias) VerifyQuote(quote []byte) error {
 	url := ias.host + "/report"
 
 	var nonce [16]byte
@@ -180,7 +187,8 @@ func (ias *IAS) VerifyQuote(quote []byte) error {
 	bodyMap := make(map[string]string)
 	hexQuote := base64.StdEncoding.EncodeToString(quote)
 	bodyMap[ISV_QUOTE] = hexQuote
-	//bodyMap["pseManifest"]
+	// TODO: we are not using the PSE manifest in anyway
+	// bodyMap["pseManifest"]
 	hexNonce := hex.EncodeToString(nonce[:])
 	bodyMap[ISV_NONCE] = hexNonce
 
