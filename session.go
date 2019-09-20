@@ -270,6 +270,7 @@ func (sn *session) CreateMsg4() (*Msg4, error) {
 		Secret:         ciphertext,
 	}
 	msg4.Cmac = sn.cmacMsg4(msg4)
+	sn.authenticated = true
 	return msg4, nil
 }
 

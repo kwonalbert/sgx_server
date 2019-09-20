@@ -78,7 +78,7 @@ func (ias *ias) GetRevocationList(gid []byte) ([]byte, error) {
 	// SGX gives gid in little endian, but we need big endian.
 	reverse(gid)
 	url := ias.host + "/sigrl/" + hex.EncodeToString(gid)
-	reverse(gid)
+	reverse(gid) // reverse is an inplace reverse, so reverse it back.
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
@@ -120,9 +120,9 @@ func (ias *ias) verifyResponseSignature(resp *http.Response, body []byte) error 
 		return err
 	}
 
-	// the first block is the key used to verify the signature.
+	// The first block is the key used to verify the signature.
 	// this currently assumes that Intel always returns the right cert,
-	// and that we verify Intel's identity when we connect to it via TLS.
+	// and that we verified Intel's identity when we connect to it via TLS.
 	block, _ := pem.Decode([]byte(unescaped))
 	if block == nil {
 		return errors.New("Failed to get the IAS certificate for signature verification.")
@@ -163,7 +163,7 @@ func (ias *ias) errorAllowed(status string, advisories string) error {
 	}
 
 	if len(notAllowed) == 0 {
-		// no bad advisories found
+		// No unallowed advisories found.
 		return nil
 	} else {
 		return errors.New(fmt.Sprintf(quoteErrWithAdvisory, status, strings.Join(notAllowed, ", ")))
@@ -291,7 +291,7 @@ func (ias *ias) VerifyQuoteAndPSE(quote, pse []byte) (bool, []byte, error) {
 	return ias.processReport(hexNonce, quote, pse, resp)
 }
 
-// URL for the IAS attestation API
+// URL for the IAS attestation API.
 const (
 	// dev
 	DEBUG_IAS_HOST = "https://api.trustedservices.intel.com/sgx/dev/attestation/v3"
@@ -299,20 +299,27 @@ const (
 	IAS_HOST = "https://api.trustedservices.intel.com/sgx/attestation/v3"
 )
 
+// Fields of the header we set for the IAS.
 const (
 	HEADER_SUBSCRIPTION_KEY = "Ocp-Apim-Subscription-Key"
 )
 
-// fields of the isv returns
+// Fields of the report body.
 const (
-	ISV_NONCE      = "nonce"
-	ISV_QUOTE      = "isvEnclaveQuote"
-	ISV_QUOTE_BODY = "isvEnclaveQuoteBody"
+	ISV_NONCE        = "nonce"
+	ISV_QUOTE        = "isvEnclaveQuote"
+	ISV_QUOTE_BODY   = "isvEnclaveQuoteBody"
+	ISV_QUOTE_STATUS = "isvEnclaveQuoteStatus"
+
+	PSE_MANIFEST        = "pseManifest"
+	PSE_MANIFEST_HASH   = "pseManifestHash"
+	PSE_MANIFEST_STATUS = "pseManifestStatus"
+
+	PLATFORM_INFO_BLOB = "platformInfoBlob"
 )
 
-// possible errors from quote verification
+// Possible errors from quote verification.
 const (
-	ISV_QUOTE_STATUS           = "isvEnclaveQuoteStatus"
 	ISV_OK                     = "OK"
 	ISV_SIGNATURE_INVALID      = "SIGNATURE_INVALID"
 	ISV_GROUP_REVOKED          = "GROUP_REVOKED"
@@ -322,12 +329,8 @@ const (
 	ISV_GROUP_OUT_OF_DATE      = "GROUP_OUT_OF_DATE"
 )
 
-// fields of pse related things
+// Possible errors from platform services.
 const (
-	PSE_MANIFEST      = "pseManifest"
-	PSE_MANIFEST_HASH = "pseManifestHash"
-
-	PSE_MANIFEST_STATUS     = "pseManifestStatus"
 	PSE_OK                  = "OK"
 	PSE_UNKNOWN             = "UNKNOWN"
 	PSE_INVALID             = "INVALID"
@@ -336,11 +339,7 @@ const (
 	PSE_RL_VERSION_MISMATCH = "RL_VERSION_MISMATCH"
 )
 
-const (
-	PLATFORM_INFO_BLOB = "platformInfoBlob"
-)
-
-// possible error strings from ias
+// Possible error strings from ias.
 const (
 	quoteErr             = "Quote verification returned unallowed error [%s]."
 	quoteErrWithAdvisory = "Quote verification returned [%s] with unallowed advisories [%s]."
