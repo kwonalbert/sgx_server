@@ -140,8 +140,8 @@ func parseConfiguration(config *Configuration) *configuration {
 	}
 }
 
-// Read the configuration file, and generate the internal
-// configuration to initialize the session manager.
+// ReadConfiguration parses the configuration file, and generates the
+// internal configuration to initialize the session manager.
 // It will fail with log.Fatal if it could not parse the config.
 func ReadConfiguration(fileName string) *Configuration {
 	file, err := os.Open(fileName)

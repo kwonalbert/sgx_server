@@ -17,12 +17,22 @@ import (
 // implements, is reponsible for parsing the metadata. See the server
 // in cmd/example_server on how to do this.
 type SessionManager interface {
+	// GetSession returns (Session, true) if there exists a
+	// session that matches id. Otherwise, it returns
+	// (nil, false).
 	GetSession(id string) (Session, bool)
 
+	// NewSession creates a new session. This generates a new
+	// unique session id for the session, and returns the id
+	// and a random challenge.
 	NewSession(in *Request) (*Challenge, error)
 
+	// Msg1ToMsg3 processes SGX message 1 and generates SGX
+	// message 2 for the session matching id.
 	Msg1ToMsg2(id string, msg1 *Msg1) (*Msg2, error)
 
+	// Msg3ToMsg4 processes SGX message 3 and generates SGX
+	// message 4 for the session matching id.
 	Msg3ToMsg4(id string, msg3 *Msg3) (*Msg4, error)
 }
 
@@ -32,11 +42,13 @@ type sessionManager struct {
 	ias      IAS
 }
 
+// NewSessionManager creates a simple SessionManager with LRU cache
+// policy using the configuration.
 func NewSessionManager(config *Configuration) SessionManager {
 	configInternal := *parseConfiguration(config)
 	sm := &sessionManager{
 		configuration: configInternal,
-		sessions:      NewCache(configInternal.maxSessions),
+		sessions:      NewSimpleLRUCache(configInternal.maxSessions),
 		ias:           NewIAS(configInternal.release, configInternal.subscription, configInternal.allowedAdvisories),
 	}
 
@@ -64,7 +76,7 @@ func (sm *sessionManager) NewSession(in *Request) (*Challenge, error) {
 
 	log.Println("Creating new session:", id)
 
-	sm.sessions.Set(id, NewSession(id, sm.ias, sm.timeout, sm.mrenclaves, sm.spid, sm.longTermKey))
+	sm.sessions.Set(id, NewSession(id, sm.timeout, sm.ias, sm.mrenclaves, sm.spid, sm.longTermKey))
 	fmt.Println(id)
 
 	return &Challenge{

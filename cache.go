@@ -1,6 +1,3 @@
-// Cache maintains the map of ids to SGX sessions that this server
-// currently possesses. Currently, we only have LRU policy
-// implemented.
 package sgx_server
 
 import (
@@ -8,6 +5,10 @@ import (
 	"sync"
 )
 
+// Cache manages the lists of sessions and their ids. Typically,
+// a cache will have some sort of capacity and an eviction policy
+// which helps the SessionManager manage a number of sessions
+// effectively.
 type Cache interface {
 	// Store the session under id key.
 	Set(key string, session Session)
@@ -29,7 +30,9 @@ type cache struct {
 	items    map[string]*list.Element
 }
 
-func NewCache(capacity int) Cache {
+// NewSimpleLRUCache generates a simple cache with capacity, and
+// implements a simple LRU eviction policy.
+func NewSimpleLRUCache(capacity int) Cache {
 	c := &cache{
 		capacity: capacity,
 		queue:    list.New(),

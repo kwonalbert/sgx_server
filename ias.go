@@ -10,7 +10,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
-	fmt "fmt"
+	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -18,10 +18,15 @@ import (
 	"strings"
 )
 
+// Intel Attestation Server parameteres.
 const (
+	// Mininum Intel Attestation Server in the report.
 	MIN_IAS_VERSION_NUMBER = 3
 )
 
+// IAS communicates with the Intel Attestation Service to provide
+// the caller with the revocation list, or the result of verifying
+// the enclave quote.
 type IAS interface {
 	// GetRevocationList takes in the gid from Msg1 of the SGX
 	// attestation, and talks to the IAS to fetch and return the
