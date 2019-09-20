@@ -17,43 +17,20 @@ import (
 	"strings"
 )
 
-// URL for the IAS attestation API
-const (
-	// dev
-	DEBUG_IAS_HOST = "https://api.trustedservices.intel.com/sgx/dev/attestation/v3"
-	// prod
-	IAS_HOST = "https://api.trustedservices.intel.com/sgx/attestation/v3"
-)
-
-const (
-	HEADER_SUBSCRIPTION_KEY = "Ocp-Apim-Subscription-Key"
-)
-
-// fields of the isv returns
-const (
-	ISV_NONCE        = "nonce"
-	ISV_QUOTE        = "isvEnclaveQuote"
-	ISV_QUOTE_BODY   = "isvEnclaveQuoteBody"
-	ISV_QUOTE_STATUS = "isvEnclaveQuoteStatus"
-)
-
-// possible errors from quote verification
-const (
-	OK                   = "OK"
-	CONFIGURATION_NEEDED = "CONFIGURATION_NEEDED"
-	GROUP_OUT_OF_DATE    = "GROUP_OUT_OF_DATE"
-)
-
-// possible error strings from ias
-const (
-	quoteErr             = "Quote verification returned unallowed error [%s]."
-	quoteErrWithAdvisory = "Quote verification returned [%s] with unallowed advisories [%s]."
-)
-
 type IAS interface {
+	// GetRevocationList takes in the gid from Msg1 of the SGX
+	// attestation, and talks to the IAS to fetch and return the
+	// corresponding revocation list.
 	GetRevocationList(gid []byte) ([]byte, error)
 
-	VerifyQuote(quote []byte) error
+	// VerifyQuote takes in the SGX platform security property
+	// descruotor and the attestation quote from Msg3 of the SGX
+	// attestation, and talks to the IAS to request the quote
+	// verification. The IAS can return many advisories
+	// depending on the quote, which is included in the error
+	// returned. Returns if the PSE can be trusted, and if
+	// there was any error in quote verification.
+	VerifyQuoteAndPSE(quote, pse []byte) (bool, error)
 }
 
 type ias struct {
@@ -64,6 +41,16 @@ type ias struct {
 	client            *http.Client
 }
 
+// NewIAS creates a service that talks to the Intel Attestation
+// Service to download revocation lists and verify quotes. Depending
+// on the value of release parameter, the code will talk to the
+// development or the production version of IAS. You must also
+// provide the subscription string for the correct mode (which can
+// be found at https://api.portal.trustedservices.intel.com).
+// allowedAdvisories paramter specifies which error-advisory
+// combinations are allowed when verifying quotes. This can be
+// useful, for example, when trying to allow hyperthreading in SGX,
+// which automatically yields misconfigured error.
 func NewIAS(release bool, subscription string, allowedAdvisories map[string][]string) IAS {
 	host := DEBUG_IAS_HOST
 	if release {
@@ -145,6 +132,10 @@ func (ias *ias) verifyResponseSignature(resp *http.Response, body []byte) error 
 
 // Check if the advisories we got from Intel are allowed.
 func (ias *ias) errorAllowed(status string, advisories string) error {
+	if status == ISV_OK {
+		return nil
+	}
+
 	if _, ok := ias.allowedAdvisories[status]; !ok {
 		return errors.New(fmt.Sprintf(quoteErr, status))
 	}
@@ -174,21 +165,23 @@ func (ias *ias) errorAllowed(status string, advisories string) error {
 	}
 }
 
-func (ias *ias) VerifyQuote(quote []byte) error {
+func (ias *ias) VerifyQuoteAndPSE(quote, pse []byte) (bool, error) {
 	url := ias.host + "/report"
 
 	var nonce [16]byte
 	if n, err := rand.Read(nonce[:]); err != nil {
-		return err
+		return false, err
 	} else if n != 16 {
-		return errors.New("Could not generate random bytes for nonce")
+		return false, errors.New("Could not generate random bytes for nonce")
 	}
 
 	bodyMap := make(map[string]string)
 	hexQuote := base64.StdEncoding.EncodeToString(quote)
 	bodyMap[ISV_QUOTE] = hexQuote
-	// TODO: we are not using the PSE manifest in anyway
-	// bodyMap["pseManifest"]
+	if len(pse) > 0 {
+		bodyMap[PSE_MANIFEST] = base64.StdEncoding.EncodeToString(pse)
+	}
+
 	hexNonce := hex.EncodeToString(nonce[:])
 	bodyMap[ISV_NONCE] = hexNonce
 
@@ -199,7 +192,7 @@ func (ias *ias) VerifyQuote(quote []byte) error {
 
 	req, err := http.NewRequest("POST", url, body)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	req.Header.Set(HEADER_SUBSCRIPTION_KEY, ias.subscription)
@@ -208,41 +201,106 @@ func (ias *ias) VerifyQuote(quote []byte) error {
 
 	resp, err := ias.client.Do(req)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return errors.New(fmt.Sprintf("Could not fetch the report: Error code [%d].", resp.StatusCode))
+		return false, errors.New(fmt.Sprintf("Could not fetch the report: Error code [%d].", resp.StatusCode))
 	}
 
 	reportBytes, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return err
+		return false, err
 	}
 	report := make(map[string]interface{})
 	err = json.Unmarshal(reportBytes, &report)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	if hexNonce != report[ISV_NONCE].(string) {
-		return errors.New("Incorrect nonce from IAS.")
+		return false, errors.New("Incorrect nonce from IAS.")
 	}
 
 	if err := ias.verifyResponseSignature(resp, reportBytes); err != nil {
-		return err
+		return false, err
 	}
 
 	retQuote := report[ISV_QUOTE_BODY].(string)
-	if len(retQuote) < 432 || hexQuote[:len(retQuote)] != retQuote {
-		return errors.New("Incorrect quote returned from IAS.")
+	ret, err := base64.StdEncoding.DecodeString(retQuote)
+	if err != nil {
+		return false, err
 	}
 
-	status := report[ISV_QUOTE_STATUS].(string)
-	if status != OK {
-		return ias.errorAllowed(status, resp.Header.Get("advisory-ids"))
+	// 432 bytes for everything in the quote structure, except for
+	// the signature fields.
+	if len(ret) != 432 || !bytes.Equal(ret, quote[:432]) {
+		return false, errors.New("Incorrect quote returned from IAS.")
 	}
 
-	return nil
+	isvStatus := report[ISV_QUOTE_STATUS].(string)
+	err = ias.errorAllowed(isvStatus, resp.Header.Get("advisory-ids"))
+	if err != nil {
+		return false, err
+	}
+
+	pseStatus := report[PSE_MANIFEST_STATUS].(string)
+	switch pseStatus {
+	case PSE_OK:
+		return true, nil
+	default:
+		// Currently returns if PSE is trusted or not, but does
+		// not throw an error if it's not.
+		// TODO: Different errors for different PSE status.
+		return false, nil
+	}
+
+	return true, nil
 }
+
+// URL for the IAS attestation API
+const (
+	// dev
+	DEBUG_IAS_HOST = "https://api.trustedservices.intel.com/sgx/dev/attestation/v3"
+	// prod
+	IAS_HOST = "https://api.trustedservices.intel.com/sgx/attestation/v3"
+)
+
+const (
+	HEADER_SUBSCRIPTION_KEY = "Ocp-Apim-Subscription-Key"
+)
+
+// fields of the isv returns
+const (
+	ISV_NONCE        = "nonce"
+	ISV_QUOTE        = "isvEnclaveQuote"
+	ISV_QUOTE_BODY   = "isvEnclaveQuoteBody"
+	ISV_QUOTE_STATUS = "isvEnclaveQuoteStatus"
+)
+
+// possible errors from quote verification
+const (
+	ISV_OK                   = "OK"
+	ISV_CONFIGURATION_NEEDED = "CONFIGURATION_NEEDED"
+	ISV_GROUP_OUT_OF_DATE    = "GROUP_OUT_OF_DATE"
+)
+
+// fields of pse related things
+const (
+	PSE_MANIFEST = "pseManifest"
+
+	PSE_MANIFEST_STATUS     = "pseManifestStatus"
+	PSE_OK                  = "OK"
+	PSE_UNKNOWN             = "UNKNOWN"
+	PSE_INVALID             = "INVALID"
+	PSE_OUT_OF_DATE         = "OUT_OF_DATE"
+	PSE_REVOKED             = "REVOKED"
+	PSE_RL_VERSION_MISMATCH = "RL_VERSION_MISMATCH"
+)
+
+// possible error strings from ias
+const (
+	quoteErr             = "Quote verification returned unallowed error [%s]."
+	quoteErrWithAdvisory = "Quote verification returned [%s] with unallowed advisories [%s]."
+)

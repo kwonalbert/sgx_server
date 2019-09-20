@@ -64,6 +64,8 @@ type session struct {
 	ga          *PublicKey
 	gb          *PublicKey
 
+	pseTrusted bool
+
 	// Various session keys.
 	ephKey *ecdsa.PrivateKey
 	kdk    []byte
@@ -90,6 +92,8 @@ func NewSession(id uint64, ias IAS, timeout int, mrenclaves [][32]byte, spid []b
 		id:          id,
 		spid:        spid,
 		longTermKey: longTermKey,
+
+		pseTrusted: false,
 
 		ephKey: generateKey(),
 
@@ -212,9 +216,11 @@ func (sn *session) ProcessMsg3(msg3 *Msg3) error {
 		return errors.New("Invalid MREnclave.")
 	}
 
-	if err := sn.ias.VerifyQuote(msg3.M.Quote); err != nil {
+	pseTrusted, err := sn.ias.VerifyQuoteAndPSE(msg3.M.Quote, msg3.M.PsSecurityProp)
+	if err != nil {
 		return err
 	}
+	sn.pseTrusted = pseTrusted
 
 	sn.sk = deriveLabelKeyFromBase(sn.kdk, SK_LABEL)
 	sn.mk = deriveLabelKeyFromBase(sn.kdk, MK_LABEL)
@@ -244,13 +250,13 @@ func (sn *session) CreateMsg4() (*Msg4, error) {
 		return nil, err
 	}
 
-	// if it reaches this point, then the enclave must be trusted.
-	// TODO: actually check whether PSE is trusted or not.
+	// If it reaches this point succesfully, then the enclave must
+	// be trusted, though not necessarily the PSE.
 	// TODO: generate a Pib if EnclaveTrusted is not true
 	msg4 := &Msg4{
 		EnclaveTrusted: true,
-		PseTrusted:     false,
-		Pib:            []byte{},
+		PseTrusted:     sn.pseTrusted,
+		Pib:            nil,
 		Secret:         ciphertext,
 	}
 	msg4.Cmac = sn.cmacMsg4(msg4)
