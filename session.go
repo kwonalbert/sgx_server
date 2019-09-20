@@ -44,6 +44,8 @@ type Session interface {
 
 	CreateMsg4() (*Msg4, error)
 
+	Authenticated() bool
+
 	Seal(msg []byte) ([]byte, error)
 
 	Open(ciphertext []byte) ([]byte, error)
@@ -74,8 +76,9 @@ type session struct {
 	sk     []byte
 	mk     []byte
 
-	pseTrusted bool
-	pib        []byte
+	pseTrusted    bool
+	pib           []byte
+	authenticated bool
 
 	aes cipher.AEAD
 
@@ -96,7 +99,8 @@ func NewSession(id string, ias IAS, timeout int, mrenclaves [][32]byte, spid []b
 		spid:        spid,
 		longTermKey: longTermKey,
 
-		pseTrusted: false,
+		pseTrusted:    false,
+		authenticated: false,
 
 		ephKey: generateKey(),
 
@@ -267,6 +271,10 @@ func (sn *session) CreateMsg4() (*Msg4, error) {
 	}
 	msg4.Cmac = sn.cmacMsg4(msg4)
 	return msg4, nil
+}
+
+func (sn *session) Authenticated() bool {
+	return sn.authenticated
 }
 
 func (sn *session) Seal(msg []byte) ([]byte, error) {
