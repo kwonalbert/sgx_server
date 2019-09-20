@@ -6,76 +6,73 @@ message Request {
 }
 
 message Challenge {
-    uint64 session_id = 1;
-    bytes challenge = 2;
+  string session_id = 1;
+  bytes challenge = 2;
 }
 
 message Msg0 {
-    uint64 session_id = 1;
-    uint32 exgid = 2;
+  uint32 exgid = 1;
 }
 
 message PublicKey {
-    bytes x = 1; // 32 bytes
-    bytes y = 2; // 32 bytes
+  bytes x = 1; // 32 bytes
+  bytes y = 2; // 32 bytes
 }
 
 // send msg0 and msg1 together, as per intel's suggestion
 message Msg1 {
-    uint64 session_id = 1;
-    Msg0 msg0 = 2;
-    PublicKey ga = 3;
-    bytes gid = 4; // 4 bytes
+  Msg0 msg0 = 1;
+  PublicKey ga = 2;
+  bytes gid = 3; // 4 bytes
 }
 
 message Signature {
-    bytes r = 1; // 32 bytes
-    bytes s = 2; // 32 bytes
+  bytes r = 1; // 32 bytes
+  bytes s = 2; // 32 bytes
 }
 
 message A {
-    PublicKey gb = 1;
-    bytes spid = 2; // 16 bytes
-    // quote_type and kdf_id are actually uint16_t,
-    // but protobufs don't have such types, so keep as bytes
-    bytes quote_type = 3;
-    bytes kdf_id = 4;
-    Signature signature = 5;
+  PublicKey gb = 1;
+  bytes spid = 2; // 16 bytes
+  // quote_type and kdf_id are actually uint16_t,
+  // but protobufs don't have such types, so keep as bytes
+  bytes quote_type = 3;
+  bytes kdf_id = 4;
+  Signature signature = 5;
 }
 
 message Msg2 {
-    A a = 1;
-    bytes cmac_a = 2; // 16 bytes
-    uint32 sig_rl_size = 3;
-    bytes sig_rl = 4; // sig_rl_size bytes
+  A a = 1;
+  bytes cmac_a = 2; // 16 bytes
+  uint32 sig_rl_size = 3;
+  bytes sig_rl = 4; // sig_rl_size bytes
 }
 
 message M {
-    PublicKey ga = 1;
-    bytes ps_security_prop = 2; // 256 bytes
-    bytes quote = 3; // at least 436 bytes
+  PublicKey ga = 1;
+  bytes ps_security_prop = 2; // 256 bytes
+  bytes quote = 3; // at least 436 bytes
 }
 
 message Msg3 {
-    uint64 session_id = 1;
-    bytes cmac_m = 2; // 16 bytes
-    M m = 3;
+  bytes cmac_m = 1; // 16 bytes
+  M m = 2;
 }
 
 // TODO: figure out exactly what msg4 looks like
 message Msg4 {
-    bool enclave_trusted = 1;
-    bool pse_trusted = 2;
-    // only sent on error
-    bytes pib = 3;
-    bytes secret = 4; // encrypted using key derived from msg2
-    bytes cmac = 5; // mac of rest of the messages
+  bool enclave_trusted = 1;
+  bool pse_trusted = 2;
+  // only sent on error
+  bytes pib = 3;
+  bytes secret = 4; // encrypted using key derived from msg2
+  bytes cmac = 5; // mac of rest of the messages
 }
 
 service Attestation {
-    rpc StartAttestation(Request) returns (Challenge) {}
+  rpc StartAttestation(Request) returns (Challenge) {}
 
-    rpc SendMsg1(Msg1) returns (Msg2) {}
+  rpc SendMsg1(Msg1) returns (Msg2) {}
 
-    rpc SendMsg3(Msg3) returns (Msg4) {}
+  rpc SendMsg3(Msg3) returns (Msg4) {}
 }

@@ -10,15 +10,15 @@ import (
 
 type Cache interface {
 	// Store the session under id key.
-	Set(key uint64, session Session)
+	Set(key string, session Session)
 
 	// Get fetches the session correspoding to the session id key,
 	// and returns (point to the session, true) if the id exsits.
 	// Otherwise, Get returns (nil, false).
-	Get(key uint64) (Session, bool)
+	Get(key string) (Session, bool)
 
 	// Delete the entry if the key exists.
-	Delete(key uint64)
+	Delete(key string)
 }
 
 type cache struct {
@@ -26,19 +26,19 @@ type cache struct {
 
 	capacity int
 	queue    *list.List // back of the queue is the oldest
-	items    map[uint64]*list.Element
+	items    map[string]*list.Element
 }
 
 func NewCache(capacity int) Cache {
 	c := &cache{
 		capacity: capacity,
 		queue:    list.New(),
-		items:    make(map[uint64]*list.Element),
+		items:    make(map[string]*list.Element),
 	}
 	return c
 }
 
-func (c *cache) Set(key uint64, session Session) {
+func (c *cache) Set(key string, session Session) {
 	c.Lock()
 	defer c.Unlock()
 	elem := c.queue.PushFront(session)
@@ -51,7 +51,7 @@ func (c *cache) Set(key uint64, session Session) {
 	}
 }
 
-func (c *cache) Get(key uint64) (Session, bool) {
+func (c *cache) Get(key string) (Session, bool) {
 	c.RLock()
 	defer c.RUnlock()
 	elem, ok := c.items[key]
@@ -62,7 +62,7 @@ func (c *cache) Get(key uint64) (Session, bool) {
 	return elem.Value.(Session), true
 }
 
-func (c *cache) Delete(key uint64) {
+func (c *cache) Delete(key string) {
 	c.Lock()
 	defer c.Unlock()
 	elem, ok := c.items[key]

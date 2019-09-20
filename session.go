@@ -34,7 +34,7 @@ const LINKABLE_QUOTE_INT = 1
 const KDF_ID_INT = 1
 
 type Session interface {
-	Id() uint64
+	Id() string
 
 	ProcessMsg1(msg1 *Msg1) error
 
@@ -54,7 +54,7 @@ type Session interface {
 }
 
 type session struct {
-	id      uint64
+	id      string
 	ias     IAS
 	timeout int
 
@@ -86,7 +86,7 @@ type session struct {
 	lastUsed time.Time
 }
 
-func NewSession(id uint64, ias IAS, timeout int, mrenclaves [][32]byte, spid []byte, longTermKey *ecdsa.PrivateKey) Session {
+func NewSession(id string, ias IAS, timeout int, mrenclaves [][32]byte, spid []byte, longTermKey *ecdsa.PrivateKey) Session {
 	s := &session{
 		ias:        ias,
 		mrenclaves: mrenclaves,
@@ -107,7 +107,7 @@ func NewSession(id uint64, ias IAS, timeout int, mrenclaves [][32]byte, spid []b
 	return s
 }
 
-func (sn *session) Id() uint64 {
+func (sn *session) Id() string {
 	return sn.id
 }
 
@@ -316,8 +316,7 @@ func (sn *session) Expired() error {
 func checkMsg1Format(msg1 *Msg1) bool {
 	return len(msg1.Ga.X) == EC_COORD_SIZE &&
 		len(msg1.Ga.Y) == EC_COORD_SIZE &&
-		len(msg1.Gid) == EPID_GID_SIZE &&
-		msg1.Msg0.SessionId == msg1.SessionId
+		len(msg1.Gid) == EPID_GID_SIZE
 }
 
 func cmacWithKey(msg, key []byte) []byte {

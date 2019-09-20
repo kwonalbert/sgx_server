@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"log"
 	"net"
@@ -12,6 +13,7 @@ import (
 	"github.com/kwonalbert/sgx_server"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/metadata"
 )
 
 var (
@@ -32,12 +34,32 @@ func (s *server) StartAttestation(ctx context.Context, in *sgx_server.Request) (
 
 func (s *server) SendMsg1(ctx context.Context, in *sgx_server.Msg1) (*sgx_server.Msg2, error) {
 	log.Println("Processing msg1")
-	return s.sm.Msg1ToMsg2(in)
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return nil, errors.New("No session id in the metadata.")
+	}
+
+	ids, ok := md["id"]
+	if !ok {
+		return nil, errors.New("No session id in the metadata.")
+	}
+
+	return s.sm.Msg1ToMsg2(ids[0], in)
 }
 
 func (s *server) SendMsg3(ctx context.Context, in *sgx_server.Msg3) (*sgx_server.Msg4, error) {
 	log.Println("Processing msg3")
-	return s.sm.Msg3ToMsg4(in)
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return nil, errors.New("No session id in the metadata.")
+	}
+
+	ids, ok := md["id"]
+	if !ok {
+		return nil, errors.New("No session id in the metadata.")
+	}
+
+	return s.sm.Msg3ToMsg4(ids[0], in)
 }
 
 func main() {
