@@ -63,11 +63,9 @@ func (sm *sessionManager) NewSession(in *Request) (*Challenge, error) {
 	id := uint64(0)
 	var bytes [8]byte
 	for true {
-		n, err := rand.Read(bytes[:])
+		_, err := rand.Read(bytes[:])
 		if err != nil {
 			return nil, err
-		} else if n != 8 {
-			return nil, errors.New("Could not generate a session id")
 		}
 
 		id = binary.BigEndian.Uint64(bytes[:])
@@ -75,6 +73,7 @@ func (sm *sessionManager) NewSession(in *Request) (*Challenge, error) {
 			continue
 		}
 		if _, ok := sm.GetSession(id); !ok {
+			// Found an unused id for the session.
 			break
 		}
 	}
@@ -94,7 +93,7 @@ func (sm *sessionManager) Msg1ToMsg2(msg1 *Msg1) (*Msg2, error) {
 		return nil, errors.New("Session not found")
 	}
 
-	// if msgs are invalid, or if we fail to create the message
+	// If msgs are invalid, or if we fail to create the message
 	// (e.g., due to timeout), then the session is removed from
 	// the list.
 	err := session.ProcessMsg1(msg1)

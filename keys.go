@@ -101,12 +101,12 @@ func kdk(mine *ecdsa.PrivateKey, peer *ecdsa.PublicKey) []byte {
 	shared := exchange(mine, peer)
 	block, err := aes.NewCipher(cmac_key[:])
 	if err != nil {
-		log.Fatal("Could not create AES for CMAC", err)
+		log.Fatal("Could not create AES for CMAC: ", err)
 	}
 
 	key, err := cmac.Sum(shared, block, aes.BlockSize)
 	if err != nil {
-		log.Fatal("Could not derive the KDK", err)
+		log.Fatal("Could not derive the KDK: ", err)
 	}
 
 	return key
@@ -125,12 +125,12 @@ func deriveLabelKey(mine *ecdsa.PrivateKey, peer *ecdsa.PublicKey, label []byte)
 
 	block, err := aes.NewCipher(base[:])
 	if err != nil {
-		log.Fatal("Could not create AES for CMAC", err)
+		log.Fatal("Could not create AES for CMAC: ", err)
 	}
 
 	key, err := cmac.Sum(keyDerivationString(label), block, aes.BlockSize)
 	if err != nil {
-		log.Fatal("Could not derive the KDK", err)
+		log.Fatal("Could not derive the KDK: ", err)
 	}
 	return base, key
 }
@@ -138,12 +138,12 @@ func deriveLabelKey(mine *ecdsa.PrivateKey, peer *ecdsa.PublicKey, label []byte)
 func deriveLabelKeyFromBase(base []byte, label []byte) []byte {
 	block, err := aes.NewCipher(base[:])
 	if err != nil {
-		log.Fatal("Could not create AES for CMAC", err)
+		log.Fatal("Could not create AES for CMAC: ", err)
 	}
 
 	key, err := cmac.Sum(keyDerivationString(label), block, aes.BlockSize)
 	if err != nil {
-		log.Fatal("Could not derive the KDK", err)
+		log.Fatal("Could not derive the KDK: ", err)
 	}
 	return key
 }

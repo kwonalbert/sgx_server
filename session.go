@@ -49,6 +49,8 @@ type Session interface {
 	Open(ciphertext []byte) ([]byte, error)
 
 	MAC(msg []byte) []byte
+
+	Expired() error
 }
 
 type session struct {
@@ -64,8 +66,6 @@ type session struct {
 	ga          *PublicKey
 	gb          *PublicKey
 
-	pseTrusted bool
-
 	// Various session keys.
 	ephKey *ecdsa.PrivateKey
 	kdk    []byte
@@ -73,6 +73,9 @@ type session struct {
 	vk     []byte
 	sk     []byte
 	mk     []byte
+
+	pseTrusted bool
+	pib        []byte
 
 	aes cipher.AEAD
 
@@ -109,7 +112,7 @@ func (sn *session) Id() uint64 {
 }
 
 func (sn *session) ProcessMsg1(msg1 *Msg1) error {
-	if err := sn.expired(); err != nil {
+	if err := sn.Expired(); err != nil {
 		return err
 	} else if !checkMsg1Format(msg1) {
 		return errors.New("Malformed message 1")
@@ -124,7 +127,7 @@ func (sn *session) ProcessMsg1(msg1 *Msg1) error {
 }
 
 func (sn *session) CreateMsg2() (*Msg2, error) {
-	if err := sn.expired(); err != nil {
+	if err := sn.Expired(); err != nil {
 		return nil, err
 	}
 
@@ -184,7 +187,7 @@ func (sn *session) CreateMsg2() (*Msg2, error) {
 }
 
 func (sn *session) ProcessMsg3(msg3 *Msg3) error {
-	if err := sn.expired(); err != nil {
+	if err := sn.Expired(); err != nil {
 		return err
 	}
 
@@ -216,11 +219,16 @@ func (sn *session) ProcessMsg3(msg3 *Msg3) error {
 		return errors.New("Invalid MREnclave.")
 	}
 
-	pseTrusted, err := sn.ias.VerifyQuoteAndPSE(msg3.M.Quote, msg3.M.PsSecurityProp)
+	pseTrusted, pib, err := sn.ias.VerifyQuoteAndPSE(msg3.M.Quote, msg3.M.PsSecurityProp)
 	if err != nil {
+		// Currently, on quote verification error, we just
+		// stop the attestation protocol. But, the PIB in
+		// such cases could help the client figure out why
+		// it was rejected.
 		return err
 	}
 	sn.pseTrusted = pseTrusted
+	sn.pib = pib
 
 	sn.sk = deriveLabelKeyFromBase(sn.kdk, SK_LABEL)
 	sn.mk = deriveLabelKeyFromBase(sn.kdk, MK_LABEL)
@@ -234,13 +242,12 @@ func (sn *session) ProcessMsg3(msg3 *Msg3) error {
 		return err
 	}
 
-	// TODO: check DEBUG in the quote
 	sn.lastUsed = time.Now()
 	return nil
 }
 
 func (sn *session) CreateMsg4() (*Msg4, error) {
-	if err := sn.expired(); err != nil {
+	if err := sn.Expired(); err != nil {
 		return nil, err
 	}
 
@@ -252,11 +259,10 @@ func (sn *session) CreateMsg4() (*Msg4, error) {
 
 	// If it reaches this point succesfully, then the enclave must
 	// be trusted, though not necessarily the PSE.
-	// TODO: generate a Pib if EnclaveTrusted is not true
 	msg4 := &Msg4{
 		EnclaveTrusted: true,
 		PseTrusted:     sn.pseTrusted,
-		Pib:            nil,
+		Pib:            sn.pib,
 		Secret:         ciphertext,
 	}
 	msg4.Cmac = sn.cmacMsg4(msg4)
@@ -264,18 +270,16 @@ func (sn *session) CreateMsg4() (*Msg4, error) {
 }
 
 func (sn *session) Seal(msg []byte) ([]byte, error) {
-	if err := sn.expired(); err != nil {
+	if err := sn.Expired(); err != nil {
 		return nil, err
 	} else if sn.sealCount > (1 << 32) {
-		return nil, errors.New("Sealed too many messages")
+		return nil, errors.New("Sealed too many messages.")
 	}
 
 	nonce := make([]byte, 12)
-	n, err := rand.Read(nonce)
+	_, err := rand.Read(nonce)
 	if err != nil {
 		return nil, err
-	} else if n != 12 {
-		return nil, errors.New("Insufficient amount of randomness for nonce.")
 	}
 
 	ciphertext := sn.aes.Seal(nil, nonce, msg, nil)
@@ -285,7 +289,7 @@ func (sn *session) Seal(msg []byte) ([]byte, error) {
 }
 
 func (sn *session) Open(ciphertext []byte) ([]byte, error) {
-	if err := sn.expired(); err != nil {
+	if err := sn.Expired(); err != nil {
 		return nil, err
 	}
 
@@ -295,6 +299,18 @@ func (sn *session) Open(ciphertext []byte) ([]byte, error) {
 
 func (sn *session) MAC(msg []byte) []byte {
 	return cmacWithKey(msg, sn.mk)
+}
+
+func (sn *session) Expired() error {
+	if sn.timeout == -1 { // timeout == -1 means it never expires
+		return nil
+	}
+
+	now := time.Now()
+	if now.After(sn.lastUsed.Add(time.Duration(sn.timeout) * time.Minute)) {
+		return errors.New(fmt.Sprintf("Session [%d] timed out.", sn.id))
+	}
+	return nil
 }
 
 func checkMsg1Format(msg1 *Msg1) bool {
@@ -307,7 +323,7 @@ func checkMsg1Format(msg1 *Msg1) bool {
 func cmacWithKey(msg, key []byte) []byte {
 	block, err := aes.NewCipher(key[:])
 	if err != nil {
-		log.Fatal("Could not create AES for CMAC", err)
+		log.Fatal("Could not create AES for CMAC: ", err)
 	}
 
 	result, err := cmac.Sum(msg, block, aes.BlockSize)
@@ -356,16 +372,4 @@ func (sn *session) hashReport() []byte {
 	concat = append(concat, sn.vk...)
 	hash := sha256.Sum256(concat)
 	return hash[:]
-}
-
-func (sn *session) expired() error {
-	if sn.timeout == -1 { // timeout == -1 means it never expires
-		return nil
-	}
-
-	now := time.Now()
-	if now.After(sn.lastUsed.Add(time.Duration(sn.timeout) * time.Minute)) {
-		return errors.New(fmt.Sprintf("Session [%d] timed out", sn.id))
-	}
-	return nil
 }

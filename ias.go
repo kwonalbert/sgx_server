@@ -3,6 +3,7 @@ package sgx_server
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
@@ -17,6 +18,10 @@ import (
 	"strings"
 )
 
+const (
+	MIN_IAS_VERSION_NUMBER = 3
+)
+
 type IAS interface {
 	// GetRevocationList takes in the gid from Msg1 of the SGX
 	// attestation, and talks to the IAS to fetch and return the
@@ -28,9 +33,9 @@ type IAS interface {
 	// attestation, and talks to the IAS to request the quote
 	// verification. The IAS can return many advisories
 	// depending on the quote, which is included in the error
-	// returned. Returns if the PSE can be trusted, and if
-	// there was any error in quote verification.
-	VerifyQuoteAndPSE(quote, pse []byte) (bool, error)
+	// returned. Returns if the PSE can be trusted, the platform
+	// information blob, and any error during quote verification.
+	VerifyQuoteAndPSE(quote, pse []byte) (bool, []byte, error)
 }
 
 type ias struct {
@@ -165,14 +170,92 @@ func (ias *ias) errorAllowed(status string, advisories string) error {
 	}
 }
 
-func (ias *ias) VerifyQuoteAndPSE(quote, pse []byte) (bool, error) {
+func (ias *ias) processReport(hexNonce string, quote, pse []byte, resp *http.Response) (bool, []byte, error) {
+	if resp.StatusCode != 200 {
+		return false, nil, errors.New(fmt.Sprintf("Could not fetch the report: Error code [%d].", resp.StatusCode))
+	}
+
+	reportBytes, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return false, nil, err
+	}
+	report := make(map[string]interface{})
+	err = json.Unmarshal(reportBytes, &report)
+	if err != nil {
+		return false, nil, err
+	}
+
+	if int(report["version"].(float64)) < MIN_IAS_VERSION_NUMBER {
+		return false, nil, errors.New("IAS version is too old.")
+	}
+
+	if hexNonce != report[ISV_NONCE].(string) {
+		return false, nil, errors.New("Incorrect nonce from IAS.")
+	}
+
+	if err := ias.verifyResponseSignature(resp, reportBytes); err != nil {
+		return false, nil, err
+	}
+
+	pseHash := sha256.Sum256(pse)
+	retPSEHash, err := hex.DecodeString(report[PSE_MANIFEST_HASH].(string))
+	if err != nil {
+		return false, nil, err
+	}
+	if !bytes.Equal(pseHash[:], retPSEHash) {
+		return false, nil, errors.New("PSE hash mismatch.")
+	}
+
+	retQuote, err := base64.StdEncoding.DecodeString(report[ISV_QUOTE_BODY].(string))
+	if err != nil {
+		return false, nil, err
+	}
+
+	// 432 bytes for everything in the quote structure, except for
+	// the signature fields.
+	if len(retQuote) != 432 || !bytes.Equal(retQuote, quote[:432]) {
+		return false, nil, errors.New("Incorrect quote returned from IAS.")
+	}
+
+	isvStatus := report[ISV_QUOTE_STATUS].(string)
+	pseStatus := report[PSE_MANIFEST_STATUS].(string)
+
+	// Platform information blob is only set on specific errors.
+	var pib []byte
+	if isvStatus == ISV_GROUP_REVOKED ||
+		isvStatus == ISV_GROUP_OUT_OF_DATE ||
+		isvStatus == ISV_CONFIGURATION_NEEDED ||
+		pseStatus == PSE_OUT_OF_DATE ||
+		pseStatus == PSE_REVOKED ||
+		pseStatus == PSE_RL_VERSION_MISMATCH {
+		pib, err = hex.DecodeString(report[PLATFORM_INFO_BLOB].(string))
+		if err != nil {
+			return false, nil, err
+		}
+	}
+
+	err = ias.errorAllowed(isvStatus, resp.Header.Get("advisory-ids"))
+	if err != nil {
+		return false, pib, err
+	}
+
+	switch pseStatus {
+	case PSE_OK:
+		return true, pib, nil
+	default:
+		// Currently returns if PSE is trusted or not, but does
+		// not throw an error if it's not.
+		// TODO: Different errors for different PSE status.
+		return false, pib, nil
+	}
+}
+
+func (ias *ias) VerifyQuoteAndPSE(quote, pse []byte) (bool, []byte, error) {
 	url := ias.host + "/report"
 
 	var nonce [16]byte
-	if n, err := rand.Read(nonce[:]); err != nil {
-		return false, err
-	} else if n != 16 {
-		return false, errors.New("Could not generate random bytes for nonce")
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return false, nil, err
 	}
 
 	bodyMap := make(map[string]string)
@@ -192,7 +275,7 @@ func (ias *ias) VerifyQuoteAndPSE(quote, pse []byte) (bool, error) {
 
 	req, err := http.NewRequest("POST", url, body)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 
 	req.Header.Set(HEADER_SUBSCRIPTION_KEY, ias.subscription)
@@ -201,62 +284,11 @@ func (ias *ias) VerifyQuoteAndPSE(quote, pse []byte) (bool, error) {
 
 	resp, err := ias.client.Do(req)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != 200 {
-		return false, errors.New(fmt.Sprintf("Could not fetch the report: Error code [%d].", resp.StatusCode))
-	}
-
-	reportBytes, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return false, err
-	}
-	report := make(map[string]interface{})
-	err = json.Unmarshal(reportBytes, &report)
-	if err != nil {
-		return false, err
-	}
-
-	if hexNonce != report[ISV_NONCE].(string) {
-		return false, errors.New("Incorrect nonce from IAS.")
-	}
-
-	if err := ias.verifyResponseSignature(resp, reportBytes); err != nil {
-		return false, err
-	}
-
-	retQuote := report[ISV_QUOTE_BODY].(string)
-	ret, err := base64.StdEncoding.DecodeString(retQuote)
-	if err != nil {
-		return false, err
-	}
-
-	// 432 bytes for everything in the quote structure, except for
-	// the signature fields.
-	if len(ret) != 432 || !bytes.Equal(ret, quote[:432]) {
-		return false, errors.New("Incorrect quote returned from IAS.")
-	}
-
-	isvStatus := report[ISV_QUOTE_STATUS].(string)
-	err = ias.errorAllowed(isvStatus, resp.Header.Get("advisory-ids"))
-	if err != nil {
-		return false, err
-	}
-
-	pseStatus := report[PSE_MANIFEST_STATUS].(string)
-	switch pseStatus {
-	case PSE_OK:
-		return true, nil
-	default:
-		// Currently returns if PSE is trusted or not, but does
-		// not throw an error if it's not.
-		// TODO: Different errors for different PSE status.
-		return false, nil
-	}
-
-	return true, nil
+	return ias.processReport(hexNonce, quote, pse, resp)
 }
 
 // URL for the IAS attestation API
@@ -273,22 +305,27 @@ const (
 
 // fields of the isv returns
 const (
-	ISV_NONCE        = "nonce"
-	ISV_QUOTE        = "isvEnclaveQuote"
-	ISV_QUOTE_BODY   = "isvEnclaveQuoteBody"
-	ISV_QUOTE_STATUS = "isvEnclaveQuoteStatus"
+	ISV_NONCE      = "nonce"
+	ISV_QUOTE      = "isvEnclaveQuote"
+	ISV_QUOTE_BODY = "isvEnclaveQuoteBody"
 )
 
 // possible errors from quote verification
 const (
-	ISV_OK                   = "OK"
-	ISV_CONFIGURATION_NEEDED = "CONFIGURATION_NEEDED"
-	ISV_GROUP_OUT_OF_DATE    = "GROUP_OUT_OF_DATE"
+	ISV_QUOTE_STATUS           = "isvEnclaveQuoteStatus"
+	ISV_OK                     = "OK"
+	ISV_SIGNATURE_INVALID      = "SIGNATURE_INVALID"
+	ISV_GROUP_REVOKED          = "GROUP_REVOKED"
+	ISV_KEY_REVOKED            = "KEY_REVOKED"
+	ISV_SIGRL_VERSION_MISMATCH = "SIGRL_VERSION_MISMATCH"
+	ISV_CONFIGURATION_NEEDED   = "CONFIGURATION_NEEDED"
+	ISV_GROUP_OUT_OF_DATE      = "GROUP_OUT_OF_DATE"
 )
 
 // fields of pse related things
 const (
-	PSE_MANIFEST = "pseManifest"
+	PSE_MANIFEST      = "pseManifest"
+	PSE_MANIFEST_HASH = "pseManifestHash"
 
 	PSE_MANIFEST_STATUS     = "pseManifestStatus"
 	PSE_OK                  = "OK"
@@ -297,6 +334,10 @@ const (
 	PSE_OUT_OF_DATE         = "OUT_OF_DATE"
 	PSE_REVOKED             = "REVOKED"
 	PSE_RL_VERSION_MISMATCH = "RL_VERSION_MISMATCH"
+)
+
+const (
+	PLATFORM_INFO_BLOB = "platformInfoBlob"
 )
 
 // possible error strings from ias
