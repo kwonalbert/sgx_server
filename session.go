@@ -368,7 +368,7 @@ func (sn *session) Expired() error {
 
 	now := time.Now()
 	if now.After(sn.lastUsed.Add(time.Duration(sn.timeout) * time.Minute)) {
-		return errors.New(fmt.Sprintf("Session [%d] timed out.", sn.id))
+		return errors.New(fmt.Sprintf("Session [%s] timed out.", sn.id))
 	}
 	return nil
 }
