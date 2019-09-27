@@ -12,7 +12,6 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -106,8 +105,6 @@ func (ias *ias) GetRevocationList(gid []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	log.Println("Downloaded the revocation list")
 	return rl, nil
 }
 
@@ -202,13 +199,16 @@ func (ias *ias) processReport(hexNonce string, quote, pse []byte, resp *http.Res
 		return false, nil, err
 	}
 
-	pseHash := sha256.Sum256(pse)
-	retPSEHash, err := hex.DecodeString(report[PSE_MANIFEST_HASH].(string))
-	if err != nil {
-		return false, nil, err
-	}
-	if !bytes.Equal(pseHash[:], retPSEHash) {
-		return false, nil, errors.New("PSE hash mismatch.")
+	isvStatus := report[ISV_QUOTE_STATUS].(string)
+	pseStatus := ""
+	if len(pse) > 0 {
+		pseHash := sha256.Sum256(pse)
+		if retPSEHash, err := hex.DecodeString(report[PSE_MANIFEST_HASH].(string)); err != nil {
+			return false, nil, err
+		} else if !bytes.Equal(pseHash[:], retPSEHash) {
+			return false, nil, errors.New("PSE hash mismatch.")
+		}
+		pseStatus = report[PSE_MANIFEST_STATUS].(string)
 	}
 
 	retQuote, err := base64.StdEncoding.DecodeString(report[ISV_QUOTE_BODY].(string))
@@ -222,17 +222,15 @@ func (ias *ias) processReport(hexNonce string, quote, pse []byte, resp *http.Res
 		return false, nil, errors.New("Incorrect quote returned from IAS.")
 	}
 
-	isvStatus := report[ISV_QUOTE_STATUS].(string)
-	pseStatus := report[PSE_MANIFEST_STATUS].(string)
-
 	// Platform information blob is only set on specific errors.
-	var pib []byte
-	if isvStatus == ISV_GROUP_REVOKED ||
+	isvBad := isvStatus == ISV_GROUP_REVOKED ||
 		isvStatus == ISV_GROUP_OUT_OF_DATE ||
-		isvStatus == ISV_CONFIGURATION_NEEDED ||
-		pseStatus == PSE_OUT_OF_DATE ||
+		isvStatus == ISV_CONFIGURATION_NEEDED
+	pseBad := pseStatus == PSE_OUT_OF_DATE ||
 		pseStatus == PSE_REVOKED ||
-		pseStatus == PSE_RL_VERSION_MISMATCH {
+		pseStatus == PSE_RL_VERSION_MISMATCH
+	var pib []byte
+	if isvBad || pseBad {
 		pib, err = hex.DecodeString(report[PLATFORM_INFO_BLOB].(string))
 		if err != nil {
 			return false, nil, err

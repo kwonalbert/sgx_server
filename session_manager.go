@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"errors"
 	fmt "fmt"
-	"log"
 )
 
 // SessionManager keeps records of different SGX sessions with
@@ -73,8 +72,6 @@ func (sm *sessionManager) NewSession(in *Request) (*Challenge, error) {
 		return nil, err
 	}
 	id := hex.EncodeToString(bytes[:])
-
-	log.Println("Creating new session:", id)
 
 	sm.sessions.Set(id, NewSession(id, sm.timeout, sm.ias, sm.mrenclaves, sm.spid, sm.longTermKey))
 	fmt.Println(id)

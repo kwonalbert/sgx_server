@@ -245,6 +245,7 @@ func (sn *session) ProcessMsg3(msg3 *Msg3) error {
 		return err
 	}
 
+	// Used in hash report so derived ahead of all the other keys.
 	sn.vk = deriveLabelKeyFromBase(sn.kdk, VK_LABEL)
 
 	if !bytes.Equal(msg3.M.Ga.X, sn.ga.X) {
@@ -277,10 +278,6 @@ func (sn *session) ProcessMsg3(msg3 *Msg3) error {
 	sn.pseTrusted = pseTrusted
 	sn.pib = pib
 	if err != nil {
-		// Currently, on quote verification error, we just
-		// stop the attestation protocol. But, the PIB in
-		// such cases could help the client figure out why
-		// it was rejected.
 		return err
 	}
 
@@ -307,14 +304,17 @@ func (sn *session) CreateMsg4() (*Msg4, error) {
 		return nil, err
 	}
 
-	secret := []byte(MSG4_SECRET)
-	ciphertext, err := sn.Seal(secret)
-	if err != nil {
-		return nil, err
+	var ciphertext []byte
+	if sn.authenticated {
+		var err error
+		secret := []byte(MSG4_SECRET)
+		ciphertext, err = sn.Seal(secret)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	// If it reaches this point succesfully, then the enclave must
-	// be trusted, though not necessarily the PSE.
+	// authenticated, pseTrusted, pib are all set in ProcessMsg3.
 	msg4 := &Msg4{
 		EnclaveTrusted: sn.authenticated,
 		PseTrusted:     sn.pseTrusted,
