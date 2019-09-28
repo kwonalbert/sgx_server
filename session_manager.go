@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
-	fmt "fmt"
 )
 
 // SessionManager keeps records of different SGX sessions with
@@ -59,26 +58,18 @@ func (sm *sessionManager) GetSession(id string) (Session, bool) {
 }
 
 func (sm *sessionManager) NewSession(in *Request) (*Challenge, error) {
-	var challenge [32]byte
-	_, err := rand.Read(challenge[:])
-	if err != nil {
-		return nil, err
-	}
-
 	// With 16 byte random ids, we should never run into collisions in IDs.
 	var bytes [16]byte
-	_, err = rand.Read(bytes[:])
+	_, err := rand.Read(bytes[:])
 	if err != nil {
 		return nil, err
 	}
 	id := hex.EncodeToString(bytes[:])
 
 	sm.sessions.Set(id, NewSession(id, sm.timeout, sm.ias, sm.mrenclaves, sm.spid, sm.longTermKey))
-	fmt.Println(id)
 
 	return &Challenge{
 		SessionId: id,
-		Challenge: challenge[:],
 	}, nil
 }
 

@@ -95,7 +95,7 @@ func (ias *ias) GetRevocationList(gid []byte) ([]byte, error) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		return nil, errors.New(fmt.Sprintf("Could not fetch revocation list: %d.", resp.StatusCode))
 	}
 
@@ -173,7 +173,7 @@ func (ias *ias) errorAllowed(status string, advisories string) error {
 }
 
 func (ias *ias) processReport(hexNonce string, quote, pse []byte, resp *http.Response) (bool, []byte, error) {
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		return false, nil, errors.New(fmt.Sprintf("Could not fetch the report: Error code [%d].", resp.StatusCode))
 	}
 

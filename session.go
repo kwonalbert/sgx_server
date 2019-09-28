@@ -36,6 +36,13 @@ const (
 	KDF_ID_INT           = 1
 	EC_COORD_SIZE        = 32
 	EPID_GID_SIZE        = 4
+
+	MRENCLAVE_SIZE = 32
+	// MREnclave starts at byte 112 in the qutoe
+	MRENCLAVE_IN_QUOTE = 112
+
+	// Hash report starts at byte 368 in the quote
+	HASH_REPORT_IN_QUOTE = 368
 )
 
 // Magic constants for deriving cryptographic keys for SGX sessions.
@@ -104,7 +111,7 @@ type session struct {
 	timeout int
 	ias     IAS
 
-	mrenclaves  [][32]byte
+	mrenclaves  [][MRENCLAVE_SIZE]byte
 	spid        []byte
 	longTermKey *ecdsa.PrivateKey
 	exgid       uint32
@@ -139,7 +146,7 @@ type session struct {
 // NewSession also receives the interface to IAS, a list of
 // MREnclaves, the SPID for this server, and the private key whose
 // public key is baked into the enclave.
-func NewSession(id string, timeout int, ias IAS, mrenclaves [][32]byte, spid []byte, longTermKey *ecdsa.PrivateKey) Session {
+func NewSession(id string, timeout int, ias IAS, mrenclaves [][MRENCLAVE_SIZE]byte, spid []byte, longTermKey *ecdsa.PrivateKey) Session {
 	s := &session{
 		ias:        ias,
 		timeout:    timeout,
@@ -249,19 +256,17 @@ func (sn *session) ProcessMsg3(msg3 *Msg3) error {
 	sn.vk = deriveLabelKeyFromBase(sn.kdk, VK_LABEL)
 
 	if !bytes.Equal(msg3.M.Ga.X, sn.ga.X) {
-		fmt.Println("X", msg3.M.Ga.X, sn.ga.X)
 		return errors.New("Msg3 GA mismatch.")
 	} else if !bytes.Equal(msg3.M.Ga.Y, sn.ga.Y) {
-		fmt.Println("Y", msg3.M.Ga.Y, sn.ga.Y)
 		return errors.New("Msg3 GA mismatch.")
 	} else if !bytes.Equal(sn.cmacM(msg3.M), msg3.CmacM) {
 		return errors.New("Msg3 MAC on M mismatch.")
-	} else if !bytes.Equal(sn.hashReport(), msg3.M.Quote[368:368+32]) {
+	} else if !bytes.Equal(sn.hashReport(), msg3.M.Quote[HASH_REPORT_IN_QUOTE:HASH_REPORT_IN_QUOTE+sha256.Size]) {
 		return errors.New("Hash mismatch on report.")
 	}
 
-	var mr [32]byte
-	copy(mr[:], msg3.M.Quote[112:112+32])
+	var mr [MRENCLAVE_SIZE]byte
+	copy(mr[:], msg3.M.Quote[MRENCLAVE_IN_QUOTE:MRENCLAVE_IN_QUOTE+MRENCLAVE_SIZE])
 
 	found := false
 	for _, valid := range sn.mrenclaves {
@@ -336,7 +341,7 @@ func (sn *session) Seal(msg []byte) ([]byte, error) {
 		return nil, errors.New("Sealed too many messages.")
 	}
 
-	nonce := make([]byte, 12)
+	nonce := make([]byte, sn.aes.NonceSize())
 	_, err := rand.Read(nonce)
 	if err != nil {
 		return nil, err
@@ -354,7 +359,8 @@ func (sn *session) Open(ciphertext []byte) ([]byte, error) {
 	}
 
 	sn.lastUsed = time.Now()
-	return sn.aes.Open(nil, ciphertext[:12], ciphertext[12:], nil)
+	nonce := sn.aes.NonceSize()
+	return sn.aes.Open(nil, ciphertext[:nonce], ciphertext[nonce:], nil)
 }
 
 func (sn *session) MAC(msg []byte) []byte {

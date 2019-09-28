@@ -115,6 +115,7 @@ func kdk(mine *ecdsa.PrivateKey, peer *ecdsa.PublicKey) []byte {
 func keyDerivationString(label []byte) []byte {
 	out := make([]byte, 4+len(label))
 	copy(out[1:], label)
+	// These are magic onstants from the remote attestation key derivation.
 	out[0] = 1
 	out[len(out)-2] = 128
 	return out
@@ -152,7 +153,7 @@ func deriveLabelKeyFromBase(base []byte, label []byte) []byte {
 func serializeBigInt(x *big.Int) []byte {
 	xb := x.Bytes()
 	reverse(xb)
-	for len(xb) < 32 {
+	for len(xb) < EC_COORD_SIZE {
 		xb = append(xb, 0)
 	}
 	return xb
