@@ -69,7 +69,7 @@ type Configuration struct {
 type configuration struct {
 	release           bool
 	subscription      string
-	mrenclaves        [][32]byte
+	mrenclaves        [][MRENCLAVE_SIZE]byte
 	spid              []byte
 	longTermKey       *ecdsa.PrivateKey
 	allowedAdvisories map[string][]string
@@ -77,13 +77,13 @@ type configuration struct {
 	timeout           int
 }
 
-func readMREnclaves(dir string) [][32]byte {
+func readMREnclaves(dir string) [][MRENCLAVE_SIZE]byte {
 	mrs, err := ioutil.ReadDir(dir)
 	if err != nil {
 		log.Fatal("Could not read mrenclaves directory:", err)
 	}
 
-	mrenclaves := make([][32]byte, len(mrs))
+	mrenclaves := make([][MRENCLAVE_SIZE]byte, len(mrs))
 	for i, mr := range mrs {
 		if mr.Name() == ".gitignore" {
 			continue
@@ -98,7 +98,7 @@ func readMREnclaves(dir string) [][32]byte {
 		if err != nil {
 			log.Fatal("Could not parse the hex mrenclave.")
 		}
-		if l != 32 {
+		if l != MRENCLAVE_SIZE {
 			log.Fatal("MREnclave files should be 32 bytes, but instead got", l)
 		}
 
