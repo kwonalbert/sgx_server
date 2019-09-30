@@ -216,9 +216,7 @@ func (ias *ias) processReport(hexNonce string, quote, pse []byte, resp *http.Res
 		return false, nil, err
 	}
 
-	// 432 bytes for everything in the quote structure, except for
-	// the signature fields.
-	if len(retQuote) != 432 || !bytes.Equal(retQuote, quote[:432]) {
+	if len(retQuote) != NO_SIG_QUOTE_LEN || !bytes.Equal(retQuote, quote[:NO_SIG_QUOTE_LEN]) {
 		return false, nil, errors.New("Incorrect quote returned from IAS.")
 	}
 
@@ -313,6 +311,10 @@ const (
 	ISV_QUOTE        = "isvEnclaveQuote"
 	ISV_QUOTE_BODY   = "isvEnclaveQuoteBody"
 	ISV_QUOTE_STATUS = "isvEnclaveQuoteStatus"
+
+	// 432 bytes for everything in the quote structure, except for
+	// the signature fields.
+	NO_SIG_QUOTE_LEN = 432
 
 	PSE_MANIFEST        = "pseManifest"
 	PSE_MANIFEST_HASH   = "pseManifestHash"
