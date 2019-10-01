@@ -99,7 +99,7 @@ func readMREnclaves(dir string) [][MRENCLAVE_SIZE]byte {
 			log.Fatal("Could not parse the hex mrenclave.")
 		}
 		if l != MRENCLAVE_SIZE {
-			log.Fatal("MREnclave files should be 32 bytes, but instead got", l)
+			log.Fatal("MREnclave file should contain 32 bytes, but instead got", l)
 		}
 
 		copy(mrenclaves[i][:], mrenclave[:])
@@ -113,7 +113,7 @@ func readSPID(shex string) []byte {
 	if err != nil {
 		log.Fatal("Could not parse the hex spid:", err)
 	} else if l != 16 {
-		log.Fatal("MREnclave files should be 16 bytes, but instead got", l)
+		log.Fatal("SPID files should contain 16 bytes, but instead got", l)
 	}
 	return spid
 }
