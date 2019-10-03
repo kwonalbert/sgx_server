@@ -103,10 +103,9 @@ func (sm *sessionManager) Msg3ToMsg4(id string, msg3 *Msg3) (*Msg4, error) {
 	}
 
 	// TODO: generate a proper Msg4 if an error happens during msg3.
-	err := session.ProcessMsg3(msg3)
-	if err != nil {
-		sm.sessions.Delete(id)
-		return nil, err
+	msg3err := session.ProcessMsg3(msg3)
+	if msg3err != nil {
+		defer sm.sessions.Delete(id)
 	}
 
 	msg4, err := session.CreateMsg4()

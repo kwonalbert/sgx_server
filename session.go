@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/aead/cmac"
+	proto "github.com/golang/protobuf/proto"
 )
 
 // MSG4_SECRET is what is sent in the last message of SGX
@@ -129,6 +130,7 @@ type session struct {
 
 	pseTrusted    bool
 	pib           []byte
+	advisories    []string
 	authenticated bool
 
 	aes cipher.AEAD
@@ -279,9 +281,10 @@ func (sn *session) ProcessMsg3(msg3 *Msg3) error {
 		return errors.New("Invalid MREnclave.")
 	}
 
-	pseTrusted, pib, err := sn.ias.VerifyQuoteAndPSE(msg3.M.Quote, msg3.M.PsSecurityProp)
+	pseTrusted, pib, advisories, err := sn.ias.VerifyQuoteAndPSE(msg3.M.Quote, msg3.M.PsSecurityProp)
 	sn.pseTrusted = pseTrusted
 	sn.pib = pib
+	sn.advisories = advisories
 	if err != nil {
 		return err
 	}
@@ -309,9 +312,9 @@ func (sn *session) CreateMsg4() (*Msg4, error) {
 		return nil, err
 	}
 
+	var err error
 	var ciphertext []byte
 	if sn.authenticated {
-		var err error
 		secret := []byte(MSG4_SECRET)
 		ciphertext, err = sn.Seal(secret)
 		if err != nil {
@@ -319,15 +322,20 @@ func (sn *session) CreateMsg4() (*Msg4, error) {
 		}
 	}
 
-	// authenticated, pseTrusted, pib are all set in ProcessMsg3.
-	msg4 := &Msg4{
+	ar := &AttestationResult{
 		EnclaveTrusted: sn.authenticated,
 		PseTrusted:     sn.pseTrusted,
 		Pib:            sn.pib,
-		Secret:         ciphertext,
+		Advisories:     sn.advisories,
 	}
-	msg4.Cmac = sn.cmacMsg4(msg4)
-	return msg4, nil
+
+	// authenticated, pseTrusted, pib are all set in ProcessMsg3.
+	msg4 := &Msg4{
+		Result: ar,
+		Secret: ciphertext,
+	}
+	msg4.Cmac, err = sn.cmacMsg4(msg4)
+	return msg4, err
 }
 
 func (sn *session) Authenticated() bool {
@@ -415,19 +423,13 @@ func (sn *session) cmacM(m *M) []byte {
 	return cmacWithKey(concat, sn.smk)
 }
 
-func (sn *session) cmacMsg4(msg4 *Msg4) []byte {
-	b1 := []byte{0}
-	if msg4.EnclaveTrusted {
-		b1[0] = 1
+func (sn *session) cmacMsg4(msg4 *Msg4) ([]byte, error) {
+	ar, err := proto.Marshal(msg4.Result)
+	if err != nil {
+		return nil, err
 	}
-	b2 := []byte{0}
-	if msg4.PseTrusted {
-		b2[0] = 1
-	}
-	concat := append(b1, b2...)
-	concat = append(concat, msg4.Pib...)
-	concat = append(concat, msg4.Secret...)
-	return cmacWithKey(concat, sn.smk)
+	concat := append(ar, msg4.Secret...)
+	return cmacWithKey(concat, sn.smk), nil
 }
 
 func (sn *session) hashReport() []byte {

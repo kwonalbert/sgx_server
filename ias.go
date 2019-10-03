@@ -38,8 +38,9 @@ type IAS interface {
 	// verification. The IAS can return many advisories
 	// depending on the quote, which is included in the error
 	// returned. Returns if the PSE can be trusted, the platform
-	// information blob, and any error during quote verification.
-	VerifyQuoteAndPSE(quote, pse []byte) (bool, []byte, error)
+	// information blob, a list of security advisories from Intel,
+	// and any error during quote verification.
+	VerifyQuoteAndPSE(quote, pse []byte) (bool, []byte, []string, error)
 }
 
 type ias struct {
@@ -138,7 +139,7 @@ func (ias *ias) verifyResponseSignature(resp *http.Response, body []byte) error 
 }
 
 // Check if the advisories we got from Intel are allowed.
-func (ias *ias) errorAllowed(status string, advisories string) error {
+func (ias *ias) errorAllowed(status string, advisories []string) error {
 	if status == ISV_OK {
 		return nil
 	}
@@ -148,10 +149,9 @@ func (ias *ias) errorAllowed(status string, advisories string) error {
 	}
 
 	// find the list of advisories that we consider critical
-	advs := strings.Split(advisories, ",")
 	var notAllowed []string
 	allowed := ias.allowedAdvisories[status]
-	for _, adv := range advs {
+	for _, adv := range advisories {
 		found := false
 		for _, good := range allowed {
 			if adv == good {
@@ -172,31 +172,31 @@ func (ias *ias) errorAllowed(status string, advisories string) error {
 	}
 }
 
-func (ias *ias) processReport(hexNonce string, quote, pse []byte, resp *http.Response) (bool, []byte, error) {
+func (ias *ias) processReport(hexNonce string, quote, pse []byte, resp *http.Response) (bool, []byte, []string, error) {
 	if resp.StatusCode != http.StatusOK {
-		return false, nil, errors.New(fmt.Sprintf("Could not fetch the report: Error code [%d].", resp.StatusCode))
+		return false, nil, nil, errors.New(fmt.Sprintf("Could not fetch the report: Error code [%d].", resp.StatusCode))
 	}
 
 	reportBytes, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return false, nil, err
+		return false, nil, nil, err
 	}
 	report := make(map[string]interface{})
 	err = json.Unmarshal(reportBytes, &report)
 	if err != nil {
-		return false, nil, err
+		return false, nil, nil, err
 	}
 
 	if int(report["version"].(float64)) < MIN_IAS_VERSION_NUMBER {
-		return false, nil, errors.New("IAS version is too old.")
+		return false, nil, nil, errors.New("IAS version is too old.")
 	}
 
 	if hexNonce != report[ISV_NONCE].(string) {
-		return false, nil, errors.New("Incorrect nonce from IAS.")
+		return false, nil, nil, errors.New("Incorrect nonce from IAS.")
 	}
 
 	if err := ias.verifyResponseSignature(resp, reportBytes); err != nil {
-		return false, nil, err
+		return false, nil, nil, err
 	}
 
 	isvStatus := report[ISV_QUOTE_STATUS].(string)
@@ -204,20 +204,20 @@ func (ias *ias) processReport(hexNonce string, quote, pse []byte, resp *http.Res
 	if len(pse) > 0 {
 		pseHash := sha256.Sum256(pse)
 		if retPSEHash, err := hex.DecodeString(report[PSE_MANIFEST_HASH].(string)); err != nil {
-			return false, nil, err
+			return false, nil, nil, err
 		} else if !bytes.Equal(pseHash[:], retPSEHash) {
-			return false, nil, errors.New("PSE hash mismatch.")
+			return false, nil, nil, errors.New("PSE hash mismatch.")
 		}
 		pseStatus = report[PSE_MANIFEST_STATUS].(string)
 	}
 
 	retQuote, err := base64.StdEncoding.DecodeString(report[ISV_QUOTE_BODY].(string))
 	if err != nil {
-		return false, nil, err
+		return false, nil, nil, err
 	}
 
 	if len(retQuote) != NO_SIG_QUOTE_LEN || !bytes.Equal(retQuote, quote[:NO_SIG_QUOTE_LEN]) {
-		return false, nil, errors.New("Incorrect quote returned from IAS.")
+		return false, nil, nil, errors.New("Incorrect quote returned from IAS.")
 	}
 
 	// Platform information blob is only set on specific errors.
@@ -231,32 +231,35 @@ func (ias *ias) processReport(hexNonce string, quote, pse []byte, resp *http.Res
 	if isvBad || pseBad {
 		pib, err = hex.DecodeString(report[PLATFORM_INFO_BLOB].(string))
 		if err != nil {
-			return false, nil, err
+			return false, nil, nil, err
 		}
+		// pib[0] is type, pib[1] is version, pib[2:4] is size
+		pib = pib[4:]
 	}
 
-	err = ias.errorAllowed(isvStatus, resp.Header.Get("advisory-ids"))
+	advisories := strings.Split(resp.Header.Get("advisory-ids"), ",")
+	err = ias.errorAllowed(isvStatus, advisories)
 	if err != nil {
-		return false, pib, err
+		return false, pib, advisories, err
 	}
 
 	switch pseStatus {
 	case PSE_OK:
-		return true, pib, nil
+		return true, pib, advisories, nil
 	default:
 		// Currently returns if PSE is trusted or not, but does
 		// not throw an error if it's not.
 		// TODO: Different errors for different PSE status.
-		return false, pib, nil
+		return false, pib, advisories, nil
 	}
 }
 
-func (ias *ias) VerifyQuoteAndPSE(quote, pse []byte) (bool, []byte, error) {
+func (ias *ias) VerifyQuoteAndPSE(quote, pse []byte) (bool, []byte, []string, error) {
 	url := ias.host + "/report"
 
 	var nonce [16]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
-		return false, nil, err
+		return false, nil, nil, err
 	}
 
 	bodyMap := make(map[string]string)
@@ -276,7 +279,7 @@ func (ias *ias) VerifyQuoteAndPSE(quote, pse []byte) (bool, []byte, error) {
 
 	req, err := http.NewRequest("POST", url, body)
 	if err != nil {
-		return false, nil, err
+		return false, nil, nil, err
 	}
 
 	req.Header.Set(HEADER_SUBSCRIPTION_KEY, ias.subscription)
@@ -285,7 +288,7 @@ func (ias *ias) VerifyQuoteAndPSE(quote, pse []byte) (bool, []byte, error) {
 
 	resp, err := ias.client.Do(req)
 	if err != nil {
-		return false, nil, err
+		return false, nil, nil, err
 	}
 	defer resp.Body.Close()
 

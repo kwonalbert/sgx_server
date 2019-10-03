@@ -58,14 +58,19 @@ message Msg3 {
   M m = 2;
 }
 
-// TODO: figure out exactly what msg4 looks like
-message Msg4 {
+message AttestationResult {
   bool enclave_trusted = 1;
   bool pse_trusted = 2;
   // only sent on error
   bytes pib = 3;
-  bytes secret = 4; // encrypted using key derived from msg2
-  bytes cmac = 5; // mac of rest of the messages
+  repeated string advisories = 4;
+}
+
+// TODO: figure out exactly what msg4 looks like
+message Msg4 {
+  AttestationResult result = 1;
+  bytes secret = 2; // encrypted using key derived from msg2
+  bytes cmac = 3; // mac of rest of the messages
 }
 
 service Attestation {
