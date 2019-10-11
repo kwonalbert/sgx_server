@@ -23,6 +23,10 @@ type Configuration struct {
 	// that are acceptable for this session manager.
 	Mrenclaves string
 
+	// The directory that contains all the MRSigner files
+	// that are acceptable for this session manager.
+	Mrsigners string
+
 	// Hex encoded SPID for IAS API. This can be found at
 	// https://api.portal.trustedservices.intel.com
 	Spid string
@@ -69,7 +73,8 @@ type Configuration struct {
 type configuration struct {
 	release           bool
 	subscription      string
-	mrenclaves        [][MRENCLAVE_SIZE]byte
+	mrenclaves        [][MR_SIZE]byte
+	mrsigners         [][MR_SIZE]byte
 	spid              []byte
 	longTermKey       *ecdsa.PrivateKey
 	allowedAdvisories map[string][]string
@@ -77,34 +82,34 @@ type configuration struct {
 	timeout           int
 }
 
-func readMREnclaves(dir string) [][MRENCLAVE_SIZE]byte {
-	mrs, err := ioutil.ReadDir(dir)
+func readMRs(dir string) [][MR_SIZE]byte {
+	mrFiles, err := ioutil.ReadDir(dir)
 	if err != nil {
-		log.Fatal("Could not read mrenclaves directory:", err)
+		log.Fatal("Could not read mr directory:", err)
 	}
 
-	mrenclaves := make([][MRENCLAVE_SIZE]byte, len(mrs))
-	for i, mr := range mrs {
+	mrs := make([][MR_SIZE]byte, len(mrFiles))
+	for i, mr := range mrFiles {
 		if mr.Name() == ".gitignore" {
 			continue
 		}
 
 		mhex, err := ioutil.ReadFile(path.Join(dir, mr.Name()))
 		if err != nil {
-			log.Fatal("Could not read the mrenclave.")
+			log.Fatal("Could not read the MR.")
 		}
 		mrenclave := make([]byte, hex.DecodedLen(len(mhex)))
 		l, err := hex.Decode(mrenclave, mhex)
 		if err != nil {
-			log.Fatal("Could not parse the hex mrenclave.")
+			log.Fatal("Could not parse the hex MR.")
 		}
-		if l != MRENCLAVE_SIZE {
-			log.Fatal("MREnclave file should contain 32 bytes, but instead got", l)
+		if l != MR_SIZE {
+			log.Fatal("MR file should contain 32 bytes, but instead got", l)
 		}
 
-		copy(mrenclaves[i][:], mrenclave[:])
+		copy(mrs[i][:], mrenclave[:])
 	}
-	return mrenclaves
+	return mrs
 }
 
 func readSPID(shex string) []byte {
@@ -131,7 +136,8 @@ func parseConfiguration(config *Configuration) *configuration {
 	return &configuration{
 		release:           config.Release,
 		subscription:      config.Subscription,
-		mrenclaves:        readMREnclaves(config.Mrenclaves),
+		mrenclaves:        readMRs(config.Mrenclaves),
+		mrsigners:         readMRs(config.Mrsigners),
 		spid:              readSPID(config.Spid),
 		longTermKey:       loadPrivateKey(config.LongTermKey, passwd),
 		allowedAdvisories: config.AllowedAdvisories,

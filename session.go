@@ -31,6 +31,7 @@ var (
 )
 
 // Magic constants used to check the SGX attestation quote.
+// Acquired from https://api.trustedservices.intel.com/documents/sgx-attestation-api-spec.pdf
 const (
 	UNLINKABLE_QUOTE_INT = 0
 	LINKABLE_QUOTE_INT   = 1
@@ -38,9 +39,15 @@ const (
 	EC_COORD_SIZE        = 32
 	EPID_GID_SIZE        = 4
 
-	MRENCLAVE_SIZE = 32
+	MR_SIZE = 32
 	// MREnclave starts at byte 112 in the qutoe
 	MRENCLAVE_IN_QUOTE = 112
+	// MRSigner starts at byte 176 in the qutoe
+	MRSIGNER_IN_QUOTE = 176
+
+	// Enclave attributes start at 96, and is 16 bytes
+	ATTRIBUTES_SIZE     = 16
+	ATTRIBUTES_IN_QUOTE = 96
 
 	// Hash report starts at byte 368 in the quote
 	HASH_REPORT_IN_QUOTE = 368
@@ -52,6 +59,22 @@ var (
 	VK_LABEL  = []byte{'V', 'K'}
 	SK_LABEL  = []byte{'S', 'K'}
 	MK_LABEL  = []byte{'M', 'K'}
+)
+
+// SGX Enclave flag bits. Acquired from sgx_attributes.h.
+const (
+	// If set, then the enclave is initialized
+	SGX_FLAGS_INITTED = 0x0000000000000001
+	// If set, then the enclave is debug
+	SGX_FLAGS_DEBUG = 0x0000000000000002
+	// If set, then the enclave is 64 bit
+	SGX_FLAGS_MODE64BIT = 0x0000000000000004
+	// If set, then the enclave has access to provision key
+	SGX_FLAGS_PROVISION_KEY = 0x0000000000000010
+	// If set, then the enclave has access to EINITTOKEN key
+	SGX_FLAGS_EINITTOKEN_KEY = 0x0000000000000020
+	// If set enclave uses KSS
+	SGX_FLAGS_KSS = 0x000000000000008
 )
 
 // Session represents a logical connection between an SGX client and
@@ -109,10 +132,12 @@ type Session interface {
 
 type session struct {
 	id      string
+	release bool
 	timeout int
 	ias     IAS
 
-	mrenclaves  [][MRENCLAVE_SIZE]byte
+	mrenclaves  [][MR_SIZE]byte
+	mrsigners   [][MR_SIZE]byte
 	spid        []byte
 	longTermKey *ecdsa.PrivateKey
 	exgid       uint32
@@ -148,13 +173,15 @@ type session struct {
 // NewSession also receives the interface to IAS, a list of
 // MREnclaves, the SPID for this server, and the private key whose
 // public key is baked into the enclave.
-func NewSession(id string, timeout int, ias IAS, mrenclaves [][MRENCLAVE_SIZE]byte, spid []byte, longTermKey *ecdsa.PrivateKey) Session {
+func NewSession(id string, release bool, timeout int, ias IAS, mrenclaves, mrsigners [][MR_SIZE]byte, spid []byte, longTermKey *ecdsa.PrivateKey) Session {
 	s := &session{
 		ias:        ias,
 		timeout:    timeout,
 		mrenclaves: mrenclaves,
+		mrsigners:  mrsigners,
 
 		id:          id,
+		release:     release,
 		spid:        spid,
 		longTermKey: longTermKey,
 
@@ -249,6 +276,21 @@ func (sn *session) CreateMsg2() (*Msg2, error) {
 	return msg2, nil
 }
 
+func checkMR(mr [MR_SIZE]byte, mrs [][MR_SIZE]byte) error {
+	// Check if a valid mr is found.
+	found := false
+	for _, valid := range mrs {
+		if mr == valid {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return errors.New("Invalid MR.")
+	}
+	return nil
+}
+
 func (sn *session) ProcessMsg3(msg3 *Msg3) error {
 	if err := sn.Expired(); err != nil {
 		return err
@@ -267,26 +309,37 @@ func (sn *session) ProcessMsg3(msg3 *Msg3) error {
 		return errors.New("Hash mismatch on report.")
 	}
 
-	var mr [MRENCLAVE_SIZE]byte
-	copy(mr[:], msg3.M.Quote[MRENCLAVE_IN_QUOTE:MRENCLAVE_IN_QUOTE+MRENCLAVE_SIZE])
-
-	found := false
-	for _, valid := range sn.mrenclaves {
-		if mr == valid {
-			found = true
-			break
-		}
-	}
-	if !found {
-		return errors.New("Invalid MREnclave.")
-	}
-
 	pseTrusted, pib, advisories, err := sn.ias.VerifyQuoteAndPSE(msg3.M.Quote, msg3.M.PsSecurityProp)
 	sn.pseTrusted = pseTrusted
 	sn.pib = pib
 	sn.advisories = advisories
 	if err != nil {
 		return err
+	}
+
+	// Check for valid MREnclave and MRSigner
+	var mr [MR_SIZE]byte
+	copy(mr[:], msg3.M.Quote[MRENCLAVE_IN_QUOTE:MRENCLAVE_IN_QUOTE+MR_SIZE])
+	if err := checkMR(mr, sn.mrenclaves); err != nil {
+		return errors.New("Invalid MREnclave.")
+	}
+	copy(mr[:], msg3.M.Quote[MRSIGNER_IN_QUOTE:MRSIGNER_IN_QUOTE+MR_SIZE])
+	if err := checkMR(mr, sn.mrsigners); err != nil {
+		return errors.New("Invalid MRSigner.")
+	}
+
+	// TODO: Check for CPU security version.
+	// TODO: Check for product ID.
+	// TODO: Check for enclave security version.
+
+	// Check for enclave attributes
+	if sn.release {
+		attr := msg3.M.Quote[ATTRIBUTES_IN_QUOTE : ATTRIBUTES_IN_QUOTE+ATTRIBUTES_SIZE]
+		if (attr[0] & SGX_FLAGS_DEBUG) != 0 {
+			// debug flag is set
+			return errors.New("Debug flag set in release mode.")
+		}
+		// TODO: What should we do about the other flags?
 	}
 
 	sn.authenticated = true

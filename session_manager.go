@@ -66,7 +66,7 @@ func (sm *sessionManager) NewSession(in *Request) (*Challenge, error) {
 	}
 	id := hex.EncodeToString(bytes[:])
 
-	sm.sessions.Set(id, NewSession(id, sm.timeout, sm.ias, sm.mrenclaves, sm.spid, sm.longTermKey))
+	sm.sessions.Set(id, NewSession(id, sm.release, sm.timeout, sm.ias, sm.mrenclaves, sm.mrsigners, sm.spid, sm.longTermKey))
 
 	return &Challenge{
 		SessionId: id,
