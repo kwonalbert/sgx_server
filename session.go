@@ -7,6 +7,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"log"
@@ -39,15 +40,33 @@ const (
 	EC_COORD_SIZE        = 32
 	EPID_GID_SIZE        = 4
 
-	MR_SIZE = 32
-	// MREnclave starts at byte 112 in the qutoe
-	MRENCLAVE_IN_QUOTE = 112
-	// MRSigner starts at byte 176 in the qutoe
-	MRSIGNER_IN_QUOTE = 176
+	// CPU security version number.
+	CPUSVN_IN_QUOTE = 48
+	CPUSVN_SIZE     = 16
 
-	// Enclave attributes start at 96, and is 16 bytes
-	ATTRIBUTES_SIZE     = 16
+	// SSA frame extended feature set.
+	// Currently not used, and is for potential future extensions.
+	MISCSELECT_IN_QUOTE = 64
+	MISCSELECT_SIZE     = 4
+
+	// MREnclave starts at byte 112 in the quote.
+	MRENCLAVE_IN_QUOTE = 112
+	// MRSigner starts at byte 176 in the quote.
+	MRSIGNER_IN_QUOTE = 176
+	// MR values are geneated using SHA-256, so it's 32 bytes.
+	MR_SIZE = 32
+
+	// Enclave production ID.
+	ISVPRODID_IN_QUOTE = 304
+	ISVPRODID_SIZE     = 2
+
+	// Enclave security version number.
+	ISVSVN_IN_QUOTE = 306
+	ISVSVN_SIZE     = 2
+
+	// Enclave attributes start at 96, and is 16 bytes.
 	ATTRIBUTES_IN_QUOTE = 96
+	ATTRIBUTES_SIZE     = 16
 
 	// Hash report starts at byte 368 in the quote
 	HASH_REPORT_IN_QUOTE = 368
@@ -132,12 +151,14 @@ type Session interface {
 
 type session struct {
 	id      string
-	release bool
 	timeout int
-	ias     IAS
 
+	release     bool
+	ias         IAS
 	mrenclaves  [][MR_SIZE]byte
 	mrsigners   [][MR_SIZE]byte
+	prodID      uint16
+	prodSVN     uint16
 	spid        []byte
 	longTermKey *ecdsa.PrivateKey
 	exgid       uint32
@@ -173,14 +194,16 @@ type session struct {
 // NewSession also receives the interface to IAS, a list of
 // MREnclaves, the SPID for this server, and the private key whose
 // public key is baked into the enclave.
-func NewSession(id string, release bool, timeout int, ias IAS, mrenclaves, mrsigners [][MR_SIZE]byte, spid []byte, longTermKey *ecdsa.PrivateKey) Session {
+func NewSession(id string, release bool, timeout int, ias IAS, mrenclaves, mrsigners [][MR_SIZE]byte, spid []byte, longTermKey *ecdsa.PrivateKey, prodID, prodSVN uint16) Session {
 	s := &session{
-		ias:        ias,
-		timeout:    timeout,
-		mrenclaves: mrenclaves,
-		mrsigners:  mrsigners,
+		id:      id,
+		timeout: timeout,
 
-		id:          id,
+		ias:         ias,
+		mrenclaves:  mrenclaves,
+		mrsigners:   mrsigners,
+		prodID:      prodID,
+		prodSVN:     prodSVN,
 		release:     release,
 		spid:        spid,
 		longTermKey: longTermKey,
@@ -329,8 +352,15 @@ func (sn *session) ProcessMsg3(msg3 *Msg3) error {
 	}
 
 	// TODO: Check for CPU security version.
-	// TODO: Check for product ID.
-	// TODO: Check for enclave security version.
+	prodID := binary.LittleEndian.Uint16(msg3.M.Quote[ISVPRODID_IN_QUOTE : ISVPRODID_IN_QUOTE+ISVPRODID_SIZE])
+	if sn.prodID != prodID {
+		return errors.New("Enclave production ID mismatch.")
+	}
+
+	prodSVN := binary.LittleEndian.Uint16(msg3.M.Quote[ISVSVN_IN_QUOTE : ISVSVN_IN_QUOTE+ISVSVN_SIZE])
+	if sn.prodSVN > prodSVN {
+		return errors.New("Enclave security version number is too low.")
+	}
 
 	// Check for enclave attributes
 	if sn.release {

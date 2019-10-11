@@ -54,6 +54,16 @@ type Configuration struct {
 	// Be careful to not set this too liberally.
 	AllowedAdvisories map[string][]string
 
+	// ProdID is the enclave production ID set by the entity
+	// generating the enclave. It must be a 16-bit int.
+	ProdID int
+
+	// ProdSVN is the enclave security version number set by the
+	// entity generating the enclave. This is used as the minimum
+	// acceptable security version number, meaning any enclave
+	// with higher SVN is accepted. It must be a 16-bit int.
+	ProdSVN int
+
 	// The maximum number of concurrent sessions the session
 	// manager will keep alive. If MaxSessions is -1, then we
 	// allow unlimited number of sessions.
@@ -78,6 +88,8 @@ type configuration struct {
 	spid              []byte
 	longTermKey       *ecdsa.PrivateKey
 	allowedAdvisories map[string][]string
+	prodID            uint16
+	prodSVN           uint16
 	maxSessions       int
 	timeout           int
 }
@@ -141,6 +153,8 @@ func parseConfiguration(config *Configuration) *configuration {
 		spid:              readSPID(config.Spid),
 		longTermKey:       loadPrivateKey(config.LongTermKey, passwd),
 		allowedAdvisories: config.AllowedAdvisories,
+		prodID:            uint16(config.ProdID),
+		prodSVN:           uint16(config.ProdSVN),
 		maxSessions:       config.MaxSessions,
 		timeout:           config.Timeout,
 	}
